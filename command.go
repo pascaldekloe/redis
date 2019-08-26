@@ -10,6 +10,7 @@ import (
 var writeBuffers = sync.Pool{New: func() interface{} { return make([]byte, 256) }}
 
 // GET executes <https://redis.io/commands/get>.
+// The return is nil if key does not exist.
 func (c *Client) GET(key string) (value []byte, err error) {
 	const prefix = "*2\r\n$3\r\nGET\r\n$"
 	buf := append(writeBuffers.Get().([]byte)[:0], prefix...)
@@ -20,6 +21,7 @@ func (c *Client) GET(key string) (value []byte, err error) {
 }
 
 // BytesGET executes <https://redis.io/commands/get>.
+// The return is nil if key does not exist.
 func (c *Client) BytesGET(key []byte) (value []byte, err error) {
 	const prefix = "*2\r\n$3\r\nGET\r\n$"
 	buf := append(writeBuffers.Get().([]byte)[:0], prefix...)
@@ -110,6 +112,7 @@ func (c *Client) APPENDString(key, value string) (newLen int64, err error) {
 }
 
 // HGET executes <https://redis.io/commands/hget>.
+// The return is nil if key does not exist.
 func (c *Client) HGET(key, field string) (value []byte, err error) {
 	const prefix = "*3\r\n$4\r\nHGET\r\n$"
 	buf := append(writeBuffers.Get().([]byte)[:0], prefix...)
@@ -120,6 +123,7 @@ func (c *Client) HGET(key, field string) (value []byte, err error) {
 }
 
 // BytesHGET executes <https://redis.io/commands/hget>.
+// The return is nil if key does not exist.
 func (c *Client) BytesHGET(key, field []byte) (value []byte, err error) {
 	const prefix = "*3\r\n$4\r\nHGET\r\n$"
 	buf := append(writeBuffers.Get().([]byte)[:0], prefix...)

@@ -13,13 +13,11 @@ import (
 // Expiry causes a reconnect, to prevent stale connections.
 var Timeout = time.Second
 
-// ConnectTimeout limits the duration for connection establishment, including
-// reconnects. Commands receive ErrOffline once expired, until the connection
-// restores. Client methods block during connect.
+// ConnectTimeout limits the duration for connection establishment,
+// including reconnects. Once expired, commands receive the timeout
+// error until the connection restores. Client methods block during
+// connect.
 var ConnectTimeout = time.Second
-
-// ErrOffline signals connection absense.
-var ErrOffline = errors.New("redis: no connection")
 
 // ErrConnLost signals connection loss on pending commands.
 // The execution state is unknown.
@@ -28,8 +26,8 @@ var ErrConnLost = errors.New("redis: connection lost")
 // errProtocol signals invalid RESP reception.
 var errProtocol = errors.New("redis: protocol violation")
 
-// ErrNull means key not found.
-var ErrNull = errors.New("redis: null")
+// ErrNull represents the null response.
+var errNull = errors.New("redis: null")
 
 // ServerError is a message send by the server.
 type ServerError string
@@ -222,7 +220,7 @@ func (p okParser) parse(r *bufio.Reader) bool {
 		return true
 
 	case first == '$' && len(line) == 2 && line[0] == '-' && line[1] == '1':
-		p <- ErrNull
+		p <- errNull
 		return true
 
 	case first == '-':
@@ -287,12 +285,11 @@ func (p bulkParser) parse(r *bufio.Reader) bool {
 
 	size := ParseInt(line)
 	if size < 0 {
-		p <- bulkResponse{Err: ErrNull}
+		p <- bulkResponse{Bytes: nil}
 		return true
 	}
 
-	var bytes []byte
-	bytes, err = readN(r, size)
+	bytes, err := readN(r, size)
 	if err != nil {
 		p <- bulkResponse{Err: err}
 		return false
@@ -320,10 +317,10 @@ func readCRLF(r *bufio.Reader) (first byte, line []byte, err error) {
 }
 
 func readN(r *bufio.Reader, n int64) ([]byte, error) {
-	if n == 0 {
-		return nil, nil
-	}
 	buf := make([]byte, n)
+	if n == 0 {
+		return buf, nil
+	}
 	done, err := r.Read(buf)
 	for done < len(buf) && err == nil {
 		var more int

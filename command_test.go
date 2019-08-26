@@ -81,15 +81,15 @@ func TestBytesKeyCRUD(t *testing.T) {
 	}
 }
 
-func TestKeysAbsent(t *testing.T) {
+func TestKeyAbsent(t *testing.T) {
 	const key = "doesn't exist"
 
 	bytes, err := testClient.GET(key)
-	if err != ErrNull {
-		t.Errorf("GET %q got error %q, want %q", key, err, ErrNull)
+	if err != nil {
+		t.Errorf("GET %q got error %q", key, err)
 	}
-	if len(bytes) != 0 {
-		t.Errorf("GET %q got %q", key, bytes)
+	if bytes != nil {
+		t.Errorf("GET %q got %q, want nil", key, bytes)
 	}
 
 	ok, err := testClient.DEL(key)
@@ -172,6 +172,48 @@ func TestBytesHashCRUD(t *testing.T) {
 	}
 	if !ok {
 		t.Errorf("HDEL %q %q got false, want true", key, field)
+	}
+}
+
+func TestHashAbsent(t *testing.T) {
+	key, field := "doesn't exist", "also not set"
+
+	bytes, err := testClient.HGET(key, field)
+	if err != nil {
+		t.Errorf("HGET %q got error %q", key, err)
+	}
+	if bytes != nil {
+		t.Errorf("HGET %q got %q, want nil", key, bytes)
+	}
+
+	ok, err := testClient.HDEL(key, field)
+	if err != nil {
+		t.Errorf("HDEL %q got error %q", key, err)
+	}
+	if ok {
+		t.Errorf("HDEL %q got true, want false", key)
+	}
+
+	key = "does exist"
+	_, err = testClient.HSETString(key, "another field", "arbitrary")
+	if err != nil {
+		t.Fatal("hash creation error:", err)
+	}
+
+	bytes, err = testClient.HGET(key, field)
+	if err != nil {
+		t.Errorf("HGET %q got error %q", key, err)
+	}
+	if bytes != nil {
+		t.Errorf("HGET %q got %q, want nil", key, bytes)
+	}
+
+	ok, err = testClient.HDEL(key, field)
+	if err != nil {
+		t.Errorf("HDEL %q got error %q", key, err)
+	}
+	if ok {
+		t.Errorf("HDEL %q got true, want false", key)
 	}
 }
 
