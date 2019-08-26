@@ -111,6 +111,186 @@ func (c *Client) APPENDString(key, value string) (newLen int64, err error) {
 	return
 }
 
+// LLEN executes <https://redis.io/commands/llen>.
+// The return is 0 if key does not exist.
+func (c *Client) LLEN(key string) (int64, error) {
+	const prefix = "*2\r\n$4\r\nLLEN\r\n$"
+	buf := append(writeBuffers.Get().([]byte)[:0], prefix...)
+	buf = appendString(buf, key)
+	n, err := c.intCmd(buf)
+	writeBuffers.Put(buf)
+	return n, err
+}
+
+// BytesLLEN executes <https://redis.io/commands/llen>.
+// The return is 0 if key does not exist.
+func (c *Client) BytesLLEN(key []byte) (int64, error) {
+	const prefix = "*2\r\n$4\r\nLLEN\r\n$"
+	buf := append(writeBuffers.Get().([]byte)[:0], prefix...)
+	buf = appendBytes(buf, key)
+	n, err := c.intCmd(buf)
+	writeBuffers.Put(buf)
+	return n, err
+}
+
+// LINDEX executes <https://redis.io/commands/lindex>.
+// The return is nil if key does not exist.
+// The return is nil if index is out of range.
+func (c *Client) LINDEX(key string, index int64) (value []byte, err error) {
+	const prefix = "*2\r\n$6\r\nLINDEX\r\n$"
+	buf := append(writeBuffers.Get().([]byte)[:0], prefix...)
+	buf = appendString(buf, key)
+	value, err = c.bulkCmd(buf)
+	writeBuffers.Put(buf)
+	return value, err
+}
+
+// BytesLINDEX executes <https://redis.io/commands/lindex>.
+// The return is nil if key does not exist.
+// The return is nil if index is out of range.
+func (c *Client) BytesLINDEX(key []byte, index int64) (value []byte, err error) {
+	const prefix = "*2\r\n$6\r\nLINDEX\r\n$"
+	buf := append(writeBuffers.Get().([]byte)[:0], prefix...)
+	buf = appendBytes(buf, key)
+	value, err = c.bulkCmd(buf)
+	writeBuffers.Put(buf)
+	return value, err
+}
+
+// LPOP executes <https://redis.io/commands/lpop>.
+// The return is nil if key does not exist.
+func (c *Client) LPOP(key string) (value []byte, err error) {
+	const prefix = "*2\r\n$4\r\nLPOP\r\n$"
+	buf := append(writeBuffers.Get().([]byte)[:0], prefix...)
+	buf = appendString(buf, key)
+	value, err = c.bulkCmd(buf)
+	writeBuffers.Put(buf)
+	return
+}
+
+// BytesLPOP executes <https://redis.io/commands/lpop>.
+// The return is nil if key does not exist.
+func (c *Client) BytesLPOP(key []byte) (value []byte, err error) {
+	const prefix = "*2\r\n$4\r\nLPOP\r\n$"
+	buf := append(writeBuffers.Get().([]byte)[:0], prefix...)
+	buf = appendBytes(buf, key)
+	value, err = c.bulkCmd(buf)
+	writeBuffers.Put(buf)
+	return
+}
+
+// RPOP executes <https://redis.io/commands/rpop>.
+// The return is nil if key does not exist.
+func (c *Client) RPOP(key string) (value []byte, err error) {
+	const prefix = "*2\r\n$4\r\nRPOP\r\n$"
+	buf := append(writeBuffers.Get().([]byte)[:0], prefix...)
+	buf = appendString(buf, key)
+	value, err = c.bulkCmd(buf)
+	writeBuffers.Put(buf)
+	return
+}
+
+// BytesRPOP executes <https://redis.io/commands/rpop>.
+// The return is nil if key does not exist.
+func (c *Client) BytesRPOP(key []byte) (value []byte, err error) {
+	const prefix = "*2\r\n$4\r\nRPOP\r\n$"
+	buf := append(writeBuffers.Get().([]byte)[:0], prefix...)
+	buf = appendBytes(buf, key)
+	value, err = c.bulkCmd(buf)
+	writeBuffers.Put(buf)
+	return
+}
+
+// LSET executes <https://redis.io/commands/lset>.
+func (c *Client) LSET(key string, index int64, value []byte) error {
+	const prefix = "*3\r\n$5\r\nLPUSH\r\n$"
+	buf := append(writeBuffers.Get().([]byte)[:0], prefix...)
+	buf = appendStringStringBytes(buf, key, strconv.FormatInt(index, 10), value)
+	err := c.okCmd(buf)
+	writeBuffers.Put(buf)
+	return err
+}
+
+// LSETString executes <https://redis.io/commands/lset>.
+func (c *Client) LSETString(key string, index int64, value string) error {
+	const prefix = "*3\r\n$5\r\nLPUSH\r\n$"
+	buf := append(writeBuffers.Get().([]byte)[:0], prefix...)
+	buf = appendStringStringString(buf, key, strconv.FormatInt(index, 10), value)
+	err := c.okCmd(buf)
+	writeBuffers.Put(buf)
+	return err
+}
+
+// BytesLSET executes <https://redis.io/commands/lset>.
+func (c *Client) BytesLSET(key []byte, index int64, value []byte) error {
+	const prefix = "*3\r\n$5\r\nLPUSH\r\n$"
+	buf := append(writeBuffers.Get().([]byte)[:0], prefix...)
+	buf = appendBytesStringBytes(buf, key, strconv.FormatInt(index, 10), value)
+	err := c.okCmd(buf)
+	writeBuffers.Put(buf)
+	return err
+}
+
+// LPUSH executes <https://redis.io/commands/lpush>.
+func (c *Client) LPUSH(key string, value []byte) (newLen int64, err error) {
+	const prefix = "*3\r\n$5\r\nLPUSH\r\n$"
+	buf := append(writeBuffers.Get().([]byte)[:0], prefix...)
+	buf = appendStringBytes(buf, key, value)
+	newLen, err = c.intCmd(buf)
+	writeBuffers.Put(buf)
+	return
+}
+
+// BytesLPUSH executes <https://redis.io/commands/lpush>.
+func (c *Client) BytesLPUSH(key, value []byte) (newLen int64, err error) {
+	const prefix = "*3\r\n$5\r\nLPUSH\r\n$"
+	buf := append(writeBuffers.Get().([]byte)[:0], prefix...)
+	buf = appendBytesBytes(buf, key, value)
+	newLen, err = c.intCmd(buf)
+	writeBuffers.Put(buf)
+	return
+}
+
+// LPUSHString executes <https://redis.io/commands/lpush>.
+func (c *Client) LPUSHString(key, value string) (newLen int64, err error) {
+	const prefix = "*3\r\n$5\r\nLPUSH\r\n$"
+	buf := append(writeBuffers.Get().([]byte)[:0], prefix...)
+	buf = appendStringString(buf, key, value)
+	newLen, err = c.intCmd(buf)
+	writeBuffers.Put(buf)
+	return
+}
+
+// RPUSH executes <https://redis.io/commands/rpush>.
+func (c *Client) RPUSH(key string, value []byte) (newLen int64, err error) {
+	const prefix = "*3\r\n$5\r\nRPUSH\r\n$"
+	buf := append(writeBuffers.Get().([]byte)[:0], prefix...)
+	buf = appendStringBytes(buf, key, value)
+	newLen, err = c.intCmd(buf)
+	writeBuffers.Put(buf)
+	return
+}
+
+// BytesRPUSH executes <https://redis.io/commands/rpush>.
+func (c *Client) BytesRPUSH(key, value []byte) (newLen int64, err error) {
+	const prefix = "*3\r\n$5\r\nRPUSH\r\n$"
+	buf := append(writeBuffers.Get().([]byte)[:0], prefix...)
+	buf = appendBytesBytes(buf, key, value)
+	newLen, err = c.intCmd(buf)
+	writeBuffers.Put(buf)
+	return
+}
+
+// RPUSHString executes <https://redis.io/commands/rpush>.
+func (c *Client) RPUSHString(key, value string) (newLen int64, err error) {
+	const prefix = "*3\r\n$5\r\nRPUSH\r\n$"
+	buf := append(writeBuffers.Get().([]byte)[:0], prefix...)
+	buf = appendStringString(buf, key, value)
+	newLen, err = c.intCmd(buf)
+	writeBuffers.Put(buf)
+	return
+}
+
 // HGET executes <https://redis.io/commands/hget>.
 // The return is nil if key does not exist.
 func (c *Client) HGET(key, field string) (value []byte, err error) {
@@ -235,7 +415,23 @@ func appendStringString(buf []byte, a1, a2 string) []byte {
 	return buf
 }
 
-func appendBytesBytesBytes(buf []byte, a1, a2, a3 []byte) []byte {
+func appendBytesBytesBytes(buf, a1, a2, a3 []byte) []byte {
+	buf = strconv.AppendUint(buf, uint64(len(a1)), 10)
+	buf = append(buf, '\r', '\n')
+	buf = append(buf, a1...)
+	buf = append(buf, '\r', '\n', '$')
+	buf = strconv.AppendUint(buf, uint64(len(a2)), 10)
+	buf = append(buf, '\r', '\n')
+	buf = append(buf, a2...)
+	buf = append(buf, '\r', '\n', '$')
+	buf = strconv.AppendUint(buf, uint64(len(a3)), 10)
+	buf = append(buf, '\r', '\n')
+	buf = append(buf, a3...)
+	buf = append(buf, '\r', '\n')
+	return buf
+}
+
+func appendBytesStringBytes(buf, a1 []byte, a2 string, a3 []byte) []byte {
 	buf = strconv.AppendUint(buf, uint64(len(a1)), 10)
 	buf = append(buf, '\r', '\n')
 	buf = append(buf, a1...)
