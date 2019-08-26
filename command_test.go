@@ -9,15 +9,12 @@ import (
 
 var testClient *Client
 
-func TestMain(m *testing.M) {
+func init() {
 	addr := os.Getenv("TEST_REDIS_ADDR")
 	if addr == "" {
-		log.Fatal("Need TEST_REDIS_ADDR evironment variable with address of test server.\nCAUTION! Tests insert, modify and delete data.")
+		log.Fatal("Need TEST_REDIS_ADDR evironment variable with an address of a test server.\nCAUTION! Tests insert, modify and delete data.")
 	}
-
 	testClient = NewClient(addr)
-
-	os.Exit(m.Run())
 }
 
 func TestKeyCRUD(t *testing.T) {
