@@ -3,8 +3,10 @@ package redis
 import (
 	"fmt"
 	"log"
+	"math/rand"
 	"os"
 	"testing"
+	"time"
 )
 
 var testClient *Client
@@ -15,6 +17,8 @@ func init() {
 		log.Fatal("Need TEST_REDIS_ADDR evironment variable with an address of a test server.\nCAUTION! Tests insert, modify and delete data.")
 	}
 	testClient = NewClient(addr)
+
+	rand.Seed(time.Now().UnixNano())
 }
 
 func TestKeyCRUD(t *testing.T) {
@@ -98,6 +102,96 @@ func TestKeyAbsent(t *testing.T) {
 	}
 	if ok {
 		t.Errorf("DEL %q got true, want false", key)
+	}
+}
+
+func TestListLeft(t *testing.T) {
+	key := fmt.Sprintf("test-list-%d", rand.Uint64())
+	const minus, zero, one = "-", "zero", "one"
+
+	if newLen, err := testClient.LPUSH(key, []byte(one)); err != nil {
+		t.Fatalf("LPUSH %q %q got error %q", key, one, err)
+	} else if newLen != 1 {
+		t.Errorf("LPUSH %q %q got len %d, want 1", key, one, newLen)
+	}
+	if newLen, err := testClient.BytesLPUSH([]byte(key), []byte(zero)); err != nil {
+		t.Fatalf("LPUSH %q %q got error %q", key, zero, err)
+	} else if newLen != 2 {
+		t.Errorf("LPUSH %q %q got len %d, want 2", key, zero, newLen)
+	}
+	if newLen, err := testClient.LPUSHString(key, minus); err != nil {
+		t.Fatalf("LPUSH %q %q got error %q", key, minus, err)
+	} else if newLen != 3 {
+		t.Errorf("LPUSH %q %q got len %d, want 3", key, minus, newLen)
+	}
+
+	if value, err := testClient.LPOP(key); err != nil {
+		t.Errorf("LPOP %q got error %q", key, err)
+	} else if string(value) != minus {
+		t.Errorf("LPOP %q got %q, want %q", key, value, minus)
+	}
+	if value, err := testClient.BytesLPOP([]byte(key)); err != nil {
+		t.Errorf("LPOP %q got error %q", key, err)
+	} else if string(value) != zero {
+		t.Errorf("LPOP %q got %q, want %q", key, value, zero)
+	}
+}
+
+func TestListRight(t *testing.T) {
+	key := fmt.Sprintf("test-list-%d", rand.Uint64())
+	const minus, zero, one = "-", "zero", "one"
+
+	if newLen, err := testClient.RPUSH(key, []byte(one)); err != nil {
+		t.Fatalf("RPUSH %q %q got error %q", key, one, err)
+	} else if newLen != 1 {
+		t.Errorf("RPUSH %q %q got len %d, want 1", key, one, newLen)
+	}
+	if newLen, err := testClient.BytesRPUSH([]byte(key), []byte(zero)); err != nil {
+		t.Fatalf("RPUSH %q %q got error %q", key, zero, err)
+	} else if newLen != 2 {
+		t.Errorf("RPUSH %q %q got len %d, want 2", key, zero, newLen)
+	}
+	if newLen, err := testClient.RPUSHString(key, minus); err != nil {
+		t.Fatalf("RPUSH %q %q got error %q", key, minus, err)
+	} else if newLen != 3 {
+		t.Errorf("RPUSH %q %q got len %d, want 3", key, minus, newLen)
+	}
+
+	if value, err := testClient.RPOP(key); err != nil {
+		t.Errorf("RPOP %q got error %q", key, err)
+	} else if string(value) != minus {
+		t.Errorf("RPOP %q got %q, want %q", key, value, minus)
+	}
+	if value, err := testClient.BytesRPOP([]byte(key)); err != nil {
+		t.Errorf("RPOP %q got error %q", key, err)
+	} else if string(value) != zero {
+		t.Errorf("RPOP %q got %q, want %q", key, value, zero)
+	}
+}
+
+func TestNoSuchList(t *testing.T) {
+	const key = "doesn't exist"
+
+	if n, err := testClient.LLEN(key); err != nil {
+		t.Errorf("LLEN %q got error %q", key, err)
+	} else if n != 0 {
+		t.Errorf("LLEN %q got %d, want 0 for non-existing", key, n)
+	}
+
+	const noSuchKey = `redis: server error "ERR no such key"`
+	if err := testClient.LSET(key, 1, nil); err == nil || err.Error() != noSuchKey {
+		t.Errorf(`LSET %q 1 "" got error %q, want %q`, key, err, noSuchKey)
+	}
+
+	if value, err := testClient.LPOP(key); err != nil {
+		t.Errorf("LPOP %q got error %q", key, err)
+	} else if value != nil {
+		t.Errorf("LPOP %q got %q, want nil", key, value)
+	}
+	if value, err := testClient.RPOP(key); err != nil {
+		t.Errorf("RPOP %q got error %q", key, err)
+	} else if value != nil {
+		t.Errorf("RPOP %q got %q, want nil", key, value)
 	}
 }
 

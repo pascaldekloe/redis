@@ -137,9 +137,9 @@ func (c *Client) BytesLLEN(key []byte) (int64, error) {
 // The return is nil if key does not exist.
 // The return is nil if index is out of range.
 func (c *Client) LINDEX(key string, index int64) (value []byte, err error) {
-	const prefix = "*2\r\n$6\r\nLINDEX\r\n$"
+	const prefix = "*3\r\n$6\r\nLINDEX\r\n$"
 	buf := append(writeBuffers.Get().([]byte)[:0], prefix...)
-	buf = appendString(buf, key)
+	buf = appendStringInt(buf, key, index)
 	value, err = c.bulkCmd(buf)
 	writeBuffers.Put(buf)
 	return value, err
@@ -149,9 +149,9 @@ func (c *Client) LINDEX(key string, index int64) (value []byte, err error) {
 // The return is nil if key does not exist.
 // The return is nil if index is out of range.
 func (c *Client) BytesLINDEX(key []byte, index int64) (value []byte, err error) {
-	const prefix = "*2\r\n$6\r\nLINDEX\r\n$"
+	const prefix = "*3\r\n$6\r\nLINDEX\r\n$"
 	buf := append(writeBuffers.Get().([]byte)[:0], prefix...)
-	buf = appendBytes(buf, key)
+	buf = appendBytesInt(buf, key, index)
 	value, err = c.bulkCmd(buf)
 	writeBuffers.Put(buf)
 	return value, err
@@ -203,9 +203,9 @@ func (c *Client) BytesRPOP(key []byte) (value []byte, err error) {
 
 // LSET executes <https://redis.io/commands/lset>.
 func (c *Client) LSET(key string, index int64, value []byte) error {
-	const prefix = "*3\r\n$5\r\nLPUSH\r\n$"
+	const prefix = "*4\r\n$4\r\nLSET\r\n$"
 	buf := append(writeBuffers.Get().([]byte)[:0], prefix...)
-	buf = appendStringStringBytes(buf, key, strconv.FormatInt(index, 10), value)
+	buf = appendStringIntBytes(buf, key, index, value)
 	err := c.okCmd(buf)
 	writeBuffers.Put(buf)
 	return err
@@ -213,9 +213,9 @@ func (c *Client) LSET(key string, index int64, value []byte) error {
 
 // LSETString executes <https://redis.io/commands/lset>.
 func (c *Client) LSETString(key string, index int64, value string) error {
-	const prefix = "*3\r\n$5\r\nLPUSH\r\n$"
+	const prefix = "*4\r\n$4\r\nSET\r\n$"
 	buf := append(writeBuffers.Get().([]byte)[:0], prefix...)
-	buf = appendStringStringString(buf, key, strconv.FormatInt(index, 10), value)
+	buf = appendStringIntString(buf, key, index, value)
 	err := c.okCmd(buf)
 	writeBuffers.Put(buf)
 	return err
@@ -223,9 +223,9 @@ func (c *Client) LSETString(key string, index int64, value string) error {
 
 // BytesLSET executes <https://redis.io/commands/lset>.
 func (c *Client) BytesLSET(key []byte, index int64, value []byte) error {
-	const prefix = "*3\r\n$5\r\nLPUSH\r\n$"
+	const prefix = "*4\r\n$4\r\nLSET\r\n$"
 	buf := append(writeBuffers.Get().([]byte)[:0], prefix...)
-	buf = appendBytesStringBytes(buf, key, strconv.FormatInt(index, 10), value)
+	buf = appendBytesIntBytes(buf, key, index, value)
 	err := c.okCmd(buf)
 	writeBuffers.Put(buf)
 	return err
@@ -391,6 +391,18 @@ func appendBytesBytes(buf, a1, a2 []byte) []byte {
 	return buf
 }
 
+func appendBytesInt(buf, a1 []byte, a2 int64) []byte {
+	buf = strconv.AppendUint(buf, uint64(len(a1)), 10)
+	buf = append(buf, '\r', '\n')
+	buf = append(buf, a1...)
+	buf = append(buf, '\r', '\n', '$')
+
+	buf = appendDecimal(buf, a2)
+
+	buf = append(buf, '\r', '\n')
+	return buf
+}
+
 func appendStringBytes(buf []byte, a1 string, a2 []byte) []byte {
 	buf = strconv.AppendUint(buf, uint64(len(a1)), 10)
 	buf = append(buf, '\r', '\n')
@@ -399,6 +411,18 @@ func appendStringBytes(buf []byte, a1 string, a2 []byte) []byte {
 	buf = strconv.AppendUint(buf, uint64(len(a2)), 10)
 	buf = append(buf, '\r', '\n')
 	buf = append(buf, a2...)
+	buf = append(buf, '\r', '\n')
+	return buf
+}
+
+func appendStringInt(buf []byte, a1 string, a2 int64) []byte {
+	buf = strconv.AppendUint(buf, uint64(len(a1)), 10)
+	buf = append(buf, '\r', '\n')
+	buf = append(buf, a1...)
+	buf = append(buf, '\r', '\n', '$')
+
+	buf = appendDecimal(buf, a2)
+
 	buf = append(buf, '\r', '\n')
 	return buf
 }
@@ -431,14 +455,46 @@ func appendBytesBytesBytes(buf, a1, a2, a3 []byte) []byte {
 	return buf
 }
 
-func appendBytesStringBytes(buf, a1 []byte, a2 string, a3 []byte) []byte {
+func appendBytesIntBytes(buf, a1 []byte, a2 int64, a3 []byte) []byte {
 	buf = strconv.AppendUint(buf, uint64(len(a1)), 10)
 	buf = append(buf, '\r', '\n')
 	buf = append(buf, a1...)
 	buf = append(buf, '\r', '\n', '$')
-	buf = strconv.AppendUint(buf, uint64(len(a2)), 10)
+
+	buf = appendDecimal(buf, a2)
+
+	buf = append(buf, '\r', '\n', '$')
+	buf = strconv.AppendUint(buf, uint64(len(a3)), 10)
 	buf = append(buf, '\r', '\n')
-	buf = append(buf, a2...)
+	buf = append(buf, a3...)
+	buf = append(buf, '\r', '\n')
+	return buf
+}
+
+func appendStringIntBytes(buf []byte, a1 string, a2 int64, a3 []byte) []byte {
+	buf = strconv.AppendUint(buf, uint64(len(a1)), 10)
+	buf = append(buf, '\r', '\n')
+	buf = append(buf, a1...)
+	buf = append(buf, '\r', '\n', '$')
+
+	buf = appendDecimal(buf, a2)
+
+	buf = append(buf, '\r', '\n', '$')
+	buf = strconv.AppendUint(buf, uint64(len(a3)), 10)
+	buf = append(buf, '\r', '\n')
+	buf = append(buf, a3...)
+	buf = append(buf, '\r', '\n')
+	return buf
+}
+
+func appendStringIntString(buf []byte, a1 string, a2 int64, a3 string) []byte {
+	buf = strconv.AppendUint(buf, uint64(len(a1)), 10)
+	buf = append(buf, '\r', '\n')
+	buf = append(buf, a1...)
+	buf = append(buf, '\r', '\n', '$')
+
+	buf = appendDecimal(buf, a2)
+
 	buf = append(buf, '\r', '\n', '$')
 	buf = strconv.AppendUint(buf, uint64(len(a3)), 10)
 	buf = append(buf, '\r', '\n')
@@ -476,6 +532,26 @@ func appendStringStringString(buf []byte, a1, a2, a3 string) []byte {
 	buf = append(buf, '\r', '\n')
 	buf = append(buf, a3...)
 	buf = append(buf, '\r', '\n')
+	return buf
+}
+
+func appendDecimal(buf []byte, v int64) []byte {
+	sizeOffset := len(buf)
+	sizeOneDecimal := v > -1e8 && v < 1e9
+	if sizeOneDecimal {
+		buf = append(buf, 0, '\r', '\n')
+	} else {
+		buf = append(buf, 0, 0, '\r', '\n')
+	}
+
+	intOffset := len(buf)
+	buf = strconv.AppendInt(buf, v, 10)
+	if size := len(buf) - intOffset; sizeOneDecimal {
+		buf[sizeOffset] = byte(size + '0')
+	} else {
+		buf[sizeOffset] = byte(size/10 + '0')
+		buf[sizeOffset+1] = byte(size%10 + '0')
+	}
 	return buf
 }
 
