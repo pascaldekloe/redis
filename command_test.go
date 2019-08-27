@@ -125,6 +125,12 @@ func TestListLeft(t *testing.T) {
 		t.Errorf("LPUSH %q %q got len %d, want 3", key, minus, newLen)
 	}
 
+	if values, err := testClient.LRANGE(key, 0, 2); err != nil {
+		t.Errorf("LRANGE %q 0 2 got error %q", key, err)
+	} else if len(values) != 3 || string(values[0]) != minus || string(values[1]) != zero || string(values[2]) != one {
+		t.Fatalf("LRANGE %q 0 2 got %q, want [%q, %q, %q]", key, values, minus, zero, one)
+	}
+
 	if value, err := testClient.LPOP(key); err != nil {
 		t.Errorf("LPOP %q got error %q", key, err)
 	} else if string(value) != minus {
@@ -157,6 +163,12 @@ func TestListRight(t *testing.T) {
 		t.Errorf("RPUSH %q %q got len %d, want 3", key, minus, newLen)
 	}
 
+	if values, err := testClient.LRANGE(key, 0, 100); err != nil {
+		t.Errorf("LRANGE %q 0 100 got error %q", key, err)
+	} else if len(values) != 3 || string(values[0]) != one || string(values[1]) != zero || string(values[2]) != minus {
+		t.Fatalf("LRANGE %q 0 100 got %q, want [%q, %q, %q]", key, values, one, zero, minus)
+	}
+
 	if value, err := testClient.RPOP(key); err != nil {
 		t.Errorf("RPOP %q got error %q", key, err)
 	} else if string(value) != minus {
@@ -181,6 +193,14 @@ func TestNoSuchList(t *testing.T) {
 	const noSuchKey = `redis: server error "ERR no such key"`
 	if err := testClient.LSET(key, 1, nil); err == nil || err.Error() != noSuchKey {
 		t.Errorf(`LSET %q 1 "" got error %q, want %q`, key, err, noSuchKey)
+	}
+
+	if value, err := testClient.BytesLRANGE([]byte(key), 0, 10); err != nil {
+		t.Errorf(`LRANGE %q 0 10 got error %q`, key, err)
+	} else if value == nil {
+		t.Errorf(`LRANGE %q 0 10 got nil, want empty`, key)
+	} else if len(value) != 0 {
+		t.Errorf(`LRANGE %q 0 10 got %q, want empty`, key, value)
 	}
 
 	if value, err := testClient.LPOP(key); err != nil {
@@ -380,6 +400,48 @@ func BenchmarkBulkString(b *testing.B) {
 						}
 						if len(bytes) != size {
 							b.Fatalf("got %d bytes, want %d", len(bytes), size)
+						}
+					}
+				})
+			})
+		})
+	}
+}
+
+func BenchmarkArray(b *testing.B) {
+	const key = "bench-array"
+	defer func() {
+		if _, err := testClient.DEL(key); err != nil {
+			b.Fatal("cleanup error:", err)
+		}
+	}()
+
+	for _, size := range []int64{2, 12, 144} {
+		b.Run(fmt.Sprintf("%dvalues", size), func(b *testing.B) {
+			for n, err := testClient.LLEN(key); n < size; n, err = testClient.RPUSHString(key, "some-value") {
+				if err != nil {
+					b.Fatal("population error:", err)
+				}
+			}
+
+			b.Run("sequential", func(b *testing.B) {
+				for i := 0; i < b.N; i++ {
+					values, err := testClient.LRANGE(key, 0, size-1)
+					if err != nil {
+						b.Fatal("error:", err)
+					} else if int64(len(values)) != size {
+						b.Fatalf("got %d values", len(values))
+					}
+				}
+			})
+			b.Run("parallel", func(b *testing.B) {
+				b.RunParallel(func(pb *testing.PB) {
+					for pb.Next() {
+						values, err := testClient.LRANGE(key, 0, size-1)
+						if err != nil {
+							b.Fatal("error:", err)
+						} else if int64(len(values)) != size {
+							b.Fatalf("got %d values", len(values))
 						}
 					}
 				})

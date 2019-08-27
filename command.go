@@ -157,6 +157,28 @@ func (c *Client) BytesLINDEX(key []byte, index int64) (value []byte, err error) 
 	return value, err
 }
 
+// LRANGE executes <https://redis.io/commands/lrange>.
+// The return is empty if key does not exist.
+func (c *Client) LRANGE(key string, start, end int64) (values [][]byte, err error) {
+	const prefix = "*4\r\n$6\r\nLRANGE\r\n$"
+	buf := append(writeBuffers.Get().([]byte)[:0], prefix...)
+	buf = appendStringIntInt(buf, key, start, end)
+	values, err = c.arrayCmd(buf)
+	writeBuffers.Put(buf)
+	return values, err
+}
+
+// BytesLRANGE executes <https://redis.io/commands/lrange>.
+// The return is empty if key does not exist.
+func (c *Client) BytesLRANGE(key []byte, start, end int64) (values [][]byte, err error) {
+	const prefix = "*4\r\n$6\r\nLRANGE\r\n$"
+	buf := append(writeBuffers.Get().([]byte)[:0], prefix...)
+	buf = appendBytesIntInt(buf, key, start, end)
+	values, err = c.arrayCmd(buf)
+	writeBuffers.Put(buf)
+	return values, err
+}
+
 // LPOP executes <https://redis.io/commands/lpop>.
 // The return is nil if key does not exist.
 func (c *Client) LPOP(key string) (value []byte, err error) {
@@ -471,6 +493,22 @@ func appendBytesIntBytes(buf, a1 []byte, a2 int64, a3 []byte) []byte {
 	return buf
 }
 
+func appendBytesIntInt(buf, a1 []byte, a2, a3 int64) []byte {
+	buf = strconv.AppendUint(buf, uint64(len(a1)), 10)
+	buf = append(buf, '\r', '\n')
+	buf = append(buf, a1...)
+	buf = append(buf, '\r', '\n', '$')
+
+	buf = appendDecimal(buf, a2)
+
+	buf = append(buf, '\r', '\n', '$')
+
+	buf = appendDecimal(buf, a3)
+
+	buf = append(buf, '\r', '\n')
+	return buf
+}
+
 func appendStringIntBytes(buf []byte, a1 string, a2 int64, a3 []byte) []byte {
 	buf = strconv.AppendUint(buf, uint64(len(a1)), 10)
 	buf = append(buf, '\r', '\n')
@@ -483,6 +521,22 @@ func appendStringIntBytes(buf []byte, a1 string, a2 int64, a3 []byte) []byte {
 	buf = strconv.AppendUint(buf, uint64(len(a3)), 10)
 	buf = append(buf, '\r', '\n')
 	buf = append(buf, a3...)
+	buf = append(buf, '\r', '\n')
+	return buf
+}
+
+func appendStringIntInt(buf []byte, a1 string, a2, a3 int64) []byte {
+	buf = strconv.AppendUint(buf, uint64(len(a1)), 10)
+	buf = append(buf, '\r', '\n')
+	buf = append(buf, a1...)
+	buf = append(buf, '\r', '\n', '$')
+
+	buf = appendDecimal(buf, a2)
+
+	buf = append(buf, '\r', '\n', '$')
+
+	buf = appendDecimal(buf, a3)
+
 	buf = append(buf, '\r', '\n')
 	return buf
 }
@@ -589,6 +643,18 @@ func (c *Client) bulkCmd(buf []byte) ([]byte, error) {
 	resp := <-parser
 	bulkParsers.Put(parser)
 	return resp.Bytes, resp.Err
+}
+
+func (c *Client) arrayCmd(buf []byte) ([][]byte, error) {
+	parser := arrayParsers.Get().(arrayParser)
+	if err := c.send(buf, parser); err != nil {
+		return nil, err
+	}
+
+	// await response
+	resp := <-parser
+	arrayParsers.Put(parser)
+	return resp.Array, resp.Err
 }
 
 func (c *Client) send(buf []byte, callback parser) error {

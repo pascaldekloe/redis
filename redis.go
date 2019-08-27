@@ -1,3 +1,4 @@
+// Package redis provides Redis serice access.
 package redis
 
 import (
@@ -203,10 +204,12 @@ type parser interface {
 var okParsers = sync.Pool{New: func() interface{} { return make(okParser, 1) }}
 var intParsers = sync.Pool{New: func() interface{} { return make(intParser, 1) }}
 var bulkParsers = sync.Pool{New: func() interface{} { return make(bulkParser, 1) }}
+var arrayParsers = sync.Pool{New: func() interface{} { return make(arrayParser, 1) }}
 
 type okParser chan error
 type intParser chan intResponse
 type bulkParser chan bulkResponse
+type arrayParser chan arrayResponse
 
 func (p okParser) parse(r *bufio.Reader) bool {
 	first, line, err := readCRLF(r)
@@ -228,7 +231,7 @@ func (p okParser) parse(r *bufio.Reader) bool {
 		return true
 
 	default:
-		p <- fmt.Errorf("%w; unexpected prefix %q on line %q", errProtocol, first, line)
+		p <- fmt.Errorf("%w; unexpected first byte %q on line %q", errProtocol, first, line)
 		return false
 	}
 }
@@ -255,7 +258,7 @@ func (p intParser) parse(r *bufio.Reader) bool {
 		return true
 
 	default:
-		p <- intResponse{Err: fmt.Errorf("%w; unexpected prefix %q on line %q", errProtocol, first, line)}
+		p <- intResponse{Err: fmt.Errorf("%w; unexpected first byte %q on line %q", errProtocol, first, line)}
 		return false
 	}
 }
@@ -279,7 +282,7 @@ func (p bulkParser) parse(r *bufio.Reader) bool {
 		p <- bulkResponse{Err: ServerError(line)}
 		return true
 	default:
-		p <- bulkResponse{Err: fmt.Errorf("%w; unexpected prefix %q on line %q", errProtocol, first, line)}
+		p <- bulkResponse{Err: fmt.Errorf("%w; unexpected first byte %q on line %q", errProtocol, first, line)}
 		return false
 	}
 
@@ -289,14 +292,75 @@ func (p bulkParser) parse(r *bufio.Reader) bool {
 		return true
 	}
 
-	bytes, err := readN(r, size)
+	bytes, err := readNCRLF(r, size)
 	if err != nil {
 		p <- bulkResponse{Err: err}
 		return false
 	}
-	_, err = r.Discard(2) // skip CRLF
 	p <- bulkResponse{Bytes: bytes, Err: err}
-	return err == nil
+	return true
+}
+
+type arrayResponse struct {
+	Array [][]byte
+	Err   error
+}
+
+func (p arrayParser) parse(r *bufio.Reader) bool {
+	first, line, err := readCRLF(r)
+	if err != nil {
+		p <- arrayResponse{Err: err}
+		return false
+	}
+
+	switch first {
+	case '*':
+		break
+	case '-':
+		p <- arrayResponse{Err: ServerError(line)}
+		return true
+	default:
+		p <- arrayResponse{Err: fmt.Errorf("%w; unexpected first byte %q on line %q", errProtocol, first, line)}
+		return false
+	}
+
+	size := ParseInt(line)
+	if size < 0 {
+		p <- arrayResponse{Array: nil}
+		return true
+	}
+	array := make([][]byte, size)
+
+	// parse elements
+	for i := range array {
+		first, line, err := readCRLF(r)
+		if err != nil {
+			p <- arrayResponse{Err: err}
+			return false
+		}
+
+		switch first {
+		case '$':
+			size := ParseInt(line)
+			if size < 0 {
+				break // null
+			}
+			array[i], err = readNCRLF(r, size)
+			if err != nil {
+				p <- arrayResponse{Err: err}
+				return false
+			}
+		case ':':
+			// copy line slice
+			array[i] = append(make([]byte, 0, len(line)), line...)
+		default:
+			p <- arrayResponse{Err: fmt.Errorf("%w; unexpected first byte %q on array element %d line %q", errProtocol, first, i, line)}
+			return false
+		}
+	}
+
+	p <- arrayResponse{Array: array}
+	return true
 }
 
 // WARNING: line valid only until the next read on r.
@@ -316,7 +380,7 @@ func readCRLF(r *bufio.Reader) (first byte, line []byte, err error) {
 	return line[0], line[1:end], nil
 }
 
-func readN(r *bufio.Reader, n int64) ([]byte, error) {
+func readNCRLF(r *bufio.Reader, n int64) ([]byte, error) {
 	buf := make([]byte, n)
 	if n == 0 {
 		return buf, nil
@@ -326,6 +390,9 @@ func readN(r *bufio.Reader, n int64) ([]byte, error) {
 		var more int
 		more, err = r.Read(buf[done:])
 		done += more
+	}
+	if err == nil {
+		_, err = r.Discard(2) // skip CRLF
 	}
 	return buf, err
 }
