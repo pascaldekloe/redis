@@ -9,14 +9,15 @@ import (
 	"time"
 )
 
-var testClient *Client
+var testClient, benchClient *Client
 
 func init() {
 	addr := os.Getenv("TEST_REDIS_ADDR")
 	if addr == "" {
 		log.Fatal("Need TEST_REDIS_ADDR evironment variable with an address of a test server.\nCAUTION! Tests insert, modify and delete data.")
 	}
-	testClient = NewClient(addr)
+	testClient = NewClient(addr, time.Second, time.Second)
+	benchClient = NewClient(addr, 0, 0)
 
 	rand.Seed(time.Now().UnixNano())
 }
@@ -336,7 +337,7 @@ func BenchmarkSimpleString(b *testing.B) {
 	value := make([]byte, 8)
 	b.Run("sequential", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
-			if err := testClient.SET(key, value); err != nil {
+			if err := benchClient.SET(key, value); err != nil {
 				b.Fatal("error:", err)
 			}
 		}
@@ -344,7 +345,7 @@ func BenchmarkSimpleString(b *testing.B) {
 	b.Run("parallel", func(b *testing.B) {
 		b.RunParallel(func(pb *testing.PB) {
 			for pb.Next() {
-				if err := testClient.SET(key, value); err != nil {
+				if err := benchClient.SET(key, value); err != nil {
 					b.Fatal("error:", err)
 				}
 			}
@@ -356,7 +357,7 @@ func BenchmarkInteger(b *testing.B) {
 	const key = "bench-key"
 	b.Run("sequential", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
-			if _, err := testClient.DEL(key); err != nil {
+			if _, err := benchClient.DEL(key); err != nil {
 				b.Fatal("error:", err)
 			}
 		}
@@ -364,7 +365,7 @@ func BenchmarkInteger(b *testing.B) {
 	b.Run("parallel", func(b *testing.B) {
 		b.RunParallel(func(pb *testing.PB) {
 			for pb.Next() {
-				if _, err := testClient.DEL(key); err != nil {
+				if _, err := benchClient.DEL(key); err != nil {
 					b.Fatal("error:", err)
 				}
 			}
@@ -376,13 +377,13 @@ func BenchmarkBulkString(b *testing.B) {
 	const key = "bench-key"
 	for _, size := range []int{8, 200, 1000} {
 		b.Run(fmt.Sprintf("%dbyte", size), func(b *testing.B) {
-			if err := testClient.SET(key, make([]byte, size)); err != nil {
+			if err := benchClient.SET(key, make([]byte, size)); err != nil {
 				b.Fatal("population error:", err)
 			}
 
 			b.Run("sequential", func(b *testing.B) {
 				for i := 0; i < b.N; i++ {
-					bytes, err := testClient.GET(key)
+					bytes, err := benchClient.GET(key)
 					if err != nil {
 						b.Fatal("error:", err)
 					}
@@ -394,7 +395,7 @@ func BenchmarkBulkString(b *testing.B) {
 			b.Run("parallel", func(b *testing.B) {
 				b.RunParallel(func(pb *testing.PB) {
 					for pb.Next() {
-						bytes, err := testClient.GET(key)
+						bytes, err := benchClient.GET(key)
 						if err != nil {
 							b.Fatal("error:", err)
 						}
@@ -411,14 +412,14 @@ func BenchmarkBulkString(b *testing.B) {
 func BenchmarkArray(b *testing.B) {
 	const key = "bench-array"
 	defer func() {
-		if _, err := testClient.DEL(key); err != nil {
+		if _, err := benchClient.DEL(key); err != nil {
 			b.Fatal("cleanup error:", err)
 		}
 	}()
 
 	for _, size := range []int64{2, 12, 144} {
 		b.Run(fmt.Sprintf("%dvalues", size), func(b *testing.B) {
-			for n, err := testClient.LLEN(key); n < size; n, err = testClient.RPUSHString(key, "some-value") {
+			for n, err := benchClient.LLEN(key); n < size; n, err = benchClient.RPUSHString(key, "some-value") {
 				if err != nil {
 					b.Fatal("population error:", err)
 				}
@@ -426,7 +427,7 @@ func BenchmarkArray(b *testing.B) {
 
 			b.Run("sequential", func(b *testing.B) {
 				for i := 0; i < b.N; i++ {
-					values, err := testClient.LRANGE(key, 0, size-1)
+					values, err := benchClient.LRANGE(key, 0, size-1)
 					if err != nil {
 						b.Fatal("error:", err)
 					} else if int64(len(values)) != size {
@@ -437,7 +438,7 @@ func BenchmarkArray(b *testing.B) {
 			b.Run("parallel", func(b *testing.B) {
 				b.RunParallel(func(pb *testing.PB) {
 					for pb.Next() {
-						values, err := testClient.LRANGE(key, 0, size-1)
+						values, err := benchClient.LRANGE(key, 0, size-1)
 						if err != nil {
 							b.Fatal("error:", err)
 						} else if int64(len(values)) != size {

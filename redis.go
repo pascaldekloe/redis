@@ -11,16 +11,6 @@ import (
 	"time"
 )
 
-// Timeout limits the command duration.
-// Expiry causes a reconnect, to prevent stale connections.
-var Timeout = time.Second
-
-// ConnectTimeout limits the duration for connection establishment,
-// including reconnects. Once expired, commands receive the timeout
-// error until the connection restores. Client methods block during
-// connect.
-var ConnectTimeout = time.Second
-
 // ErrConnLost signals connection loss on pending commands.
 // The execution state is unknown.
 var ErrConnLost = errors.New("redis: connection lost")
@@ -101,6 +91,8 @@ type Client struct {
 	// Normalized server address in use. This field is read-only.
 	Addr string
 
+	timeout, connectTimeout time.Duration
+
 	// Commands lock the semaphore to enqueue the response handler.
 	writeSem chan net.Conn
 	// Fatal write error submission keeps the semaphore locked.
@@ -118,9 +110,24 @@ type Client struct {
 // Thus, the emtpy string defaults to "localhost:6379". Use an
 // absolute file path (e.g. "/var/run/redis.sock") to use Unix
 // domain sockets.
-func NewClient(addr string) *Client {
+//
+// Timeout limits the command duration. Expiry causes a reconnect,
+// to prevent stale connections. Timeout is disabled with zero.
+//
+// ConnectTimeout limits the duration for connection establishment,
+// including reconnects. Once expired, commands receive the timeout
+// error until the connection restores. Client methods block during
+// connect. Zero defaults to one second.
+func NewClient(addr string, timeout, connectTimeout time.Duration) *Client {
+	if connectTimeout == 0 {
+		connectTimeout = time.Second
+	}
+
 	c := &Client{
-		Addr:     normalizeAddr(addr),
+		Addr:           normalizeAddr(addr),
+		timeout:        timeout,
+		connectTimeout: connectTimeout,
+
 		writeSem: make(chan net.Conn, 1),
 		writeErr: make(chan struct{}, 1),
 		queue:    make(chan parser, 128),
@@ -138,7 +145,7 @@ func (c *Client) manage() {
 		if len(c.Addr) != 0 && c.Addr[0] == '/' {
 			network = "unix"
 		}
-		dialer := net.Dialer{Timeout: ConnectTimeout}
+		dialer := net.Dialer{Timeout: c.connectTimeout}
 		conn, err := dialer.Dial(network, c.Addr)
 		if err != nil {
 			if notify == nil {
@@ -160,7 +167,9 @@ func (c *Client) manage() {
 		for {
 			select {
 			case response := <-c.queue:
-				conn.SetReadDeadline(time.Now().Add(Timeout))
+				if c.timeout != 0 {
+					conn.SetReadDeadline(time.Now().Add(c.timeout))
+				}
 				if response.parse(r) {
 					continue // command done
 				}

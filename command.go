@@ -667,7 +667,9 @@ func (c *Client) send(buf []byte, callback parser) error {
 	}
 
 	// send command
-	conn.SetWriteDeadline(time.Now().Add(Timeout))
+	if c.timeout != 0 {
+		conn.SetWriteDeadline(time.Now().Add(c.timeout))
+	}
 	if _, err := conn.Write(buf); err != nil {
 		// The write semaphore is not released.
 		select {
