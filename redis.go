@@ -11,9 +11,7 @@ import (
 	"time"
 )
 
-// ErrConnLost signals connection loss on pending commands.
-// The execution state is unknown.
-var ErrConnLost = errors.New("redis: connection lost")
+var errConnLost = errors.New("redis: connection lost while awaiting response")
 
 // errProtocol signals invalid RESP reception.
 var errProtocol = errors.New("redis: protocol violation")
@@ -198,7 +196,7 @@ func (c *Client) manage() {
 		// command submission blocked
 
 		for len(c.queue) != 0 {
-			r.Reset(errorReader{ErrConnLost})
+			r.Reset(errorReader{errConnLost})
 			(<-c.queue).parse(r)
 		}
 	}
