@@ -1,4 +1,5 @@
 [![API Documentation](https://godoc.org/github.com/pascaldekloe/redis?status.svg)](https://godoc.org/github.com/pascaldekloe/redis)
+[![Build Status](https://travis-ci.org/pascaldekloe/redis.svg?branch=master)](https://travis-ci.org/pascaldekloe/redis)
 
 ## About
 
