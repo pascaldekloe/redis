@@ -1,9 +1,12 @@
 package redis
 
 import (
+	"errors"
 	"fmt"
+	"io"
 	"log"
 	"math"
+	"net"
 	"os"
 	"strconv"
 	"testing"
@@ -48,6 +51,62 @@ func TestNormalizeAddr(t *testing.T) {
 		if got != v {
 			t.Errorf("got %d, want %d", got, v)
 		}
+	}
+}
+
+// Note that testClient must recover for the next test to pass.
+func TestWriteError(t *testing.T) {
+	timeout := time.After(time.Second)
+	select {
+	case <-timeout:
+		t.Fatal("could not aquire write sempahore")
+	case conn := <-testClient.writeSem:
+		conn.Close()
+		select {
+		case <-timeout:
+			t.Fatal("could not release write sempahore")
+		case testClient.writeSem <- conn:
+			break
+		}
+	}
+
+	_, err := testClient.DEL("key")
+	var e *net.OpError
+	if !errors.As(err, &e) {
+		t.Fatalf("got error %v, want a net.OpError", err)
+	}
+	if e.Op != "write" {
+		t.Errorf(`got error for opperation %q, want "write"`, e.Op)
+	}
+}
+
+// Note that testClient must recover for the next test to pass.
+func TestReadError(t *testing.T) {
+	timeout := time.After(time.Second)
+	select {
+	case <-timeout:
+		t.Fatal("could not aquire write sempahore")
+	case conn := <-testClient.writeSem:
+		c, ok := conn.(interface{ CloseRead() error })
+		if ok {
+			c.CloseRead()
+		}
+
+		select {
+		case <-timeout:
+			t.Fatal("could not release write sempahore")
+		case testClient.writeSem <- conn:
+			break
+		}
+
+		if !ok {
+			t.Skip("no CloseRead method on connection")
+		}
+	}
+
+	_, err := testClient.DEL("key")
+	if !errors.Is(err, io.EOF) {
+		t.Errorf("got error %v, want a EOF", err)
 	}
 }
 
