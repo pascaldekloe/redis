@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"path/filepath"
 	"sync"
 	"time"
 )
@@ -77,6 +78,10 @@ func ParseInt(bytes []byte) int64 {
 }
 
 func normalizeAddr(s string) string {
+	if len(s) != 0 && s[0] == '/' {
+		return filepath.Clean(s)
+	}
+
 	host, port, err := net.SplitHostPort(s)
 	if err != nil {
 		host = s
@@ -93,7 +98,7 @@ func normalizeAddr(s string) string {
 // Client provides command exectuion for a Redis service.
 // Multiple goroutines may invoke methods on a Client simultaneously.
 type Client struct {
-	// Server location in use. This field is read-only.
+	// Normalized server address in use. This field is read-only.
 	Addr string
 
 	// Commands lock the semaphore to enqueue the response handler.
@@ -110,6 +115,9 @@ type Client struct {
 
 // NewClient launches a managed connection to a server address.
 // The host defaults to localhost, and the port defaults to 6379.
+// Thus, the emtpy string defaults to "localhost:6379". Use an
+// absolute file path (e.g. "/var/run/redis.sock") to use Unix
+// domain sockets.
 func NewClient(addr string) *Client {
 	c := &Client{
 		Addr:     normalizeAddr(addr),
@@ -126,8 +134,12 @@ func (c *Client) manage() {
 	var notify chan error
 	for {
 		// connect
+		network := "tcp"
+		if len(c.Addr) != 0 && c.Addr[0] == '/' {
+			network = "unix"
+		}
 		dialer := net.Dialer{Timeout: ConnectTimeout}
-		conn, err := dialer.Dial("tcp", c.Addr)
+		conn, err := dialer.Dial(network, c.Addr)
 		if err != nil {
 			if notify == nil {
 				notify = make(chan error)
