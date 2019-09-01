@@ -62,6 +62,18 @@ func TestNormalizeAddr(t *testing.T) {
 	}
 }
 
+func TestUnavailable(t *testing.T) {
+	c := NewClient("doesnotexist.example.com:70", 100*time.Millisecond, 100*time.Millisecond)
+	_, err := c.INCRBY(randomKey("test"), 42)
+	var e *net.OpError
+	if !errors.As(err, &e) {
+		t.Fatalf("got error %v, want a net.OpError", err)
+	}
+	if e.Op != "dial" {
+		t.Errorf(`got error for opperation %q, want "dial"`, e.Op)
+	}
+}
+
 // Note that testClient must recover for the next test to pass.
 func TestWriteError(t *testing.T) {
 	timeout := time.After(time.Second)
