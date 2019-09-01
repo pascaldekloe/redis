@@ -67,8 +67,12 @@ func ParseInt(bytes []byte) int64 {
 	return value
 }
 
+func isUnixAddr(s string) bool {
+	return len(s) != 0 && s[0] == '/'
+}
+
 func normalizeAddr(s string) string {
-	if len(s) != 0 && s[0] == '/' {
+	if isUnixAddr(s) {
 		return filepath.Clean(s)
 	}
 
@@ -119,18 +123,23 @@ type Client struct {
 // error until the connection restores. Client methods block during
 // connect. Zero defaults to one second.
 func NewClient(addr string, timeout, connectTimeout time.Duration) *Client {
+	addr = normalizeAddr(addr)
 	if connectTimeout == 0 {
 		connectTimeout = time.Second
 	}
+	queueSize := 128
+	if isUnixAddr(addr) {
+		queueSize = 512
+	}
 
 	c := &Client{
-		Addr:           normalizeAddr(addr),
+		Addr:           addr,
 		timeout:        timeout,
 		connectTimeout: connectTimeout,
 
 		writeSem: make(chan net.Conn, 1),
 		writeErr: make(chan struct{}, 1),
-		queue:    make(chan parser, 128),
+		queue:    make(chan parser, queueSize),
 		offline:  make(chan error),
 	}
 	go c.manage()
@@ -142,7 +151,7 @@ func (c *Client) manage() {
 	for {
 		// connect
 		network := "tcp"
-		if len(c.Addr) != 0 && c.Addr[0] == '/' {
+		if isUnixAddr(c.Addr) {
 			network = "unix"
 		}
 		dialer := net.Dialer{Timeout: c.connectTimeout}
