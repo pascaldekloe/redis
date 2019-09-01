@@ -39,6 +39,9 @@ func TestParseInt(t *testing.T) {
 			t.Errorf("got %d, want %d", got, v)
 		}
 	}
+	if got := ParseInt(nil); got != 0 {
+		t.Errorf("got %d for the empty string, want 0", got)
+	}
 }
 
 func TestNormalizeAddr(t *testing.T) {
