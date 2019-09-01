@@ -48,6 +48,7 @@ func TestNormalizeAddr(t *testing.T) {
 		{"test.host", "test.host:6379"},
 		{"test.host:", "test.host:6379"},
 		{":99", "localhost:99"},
+		{"/var/redis/../run/redis.sock", "/var/run/redis.sock"},
 	}
 	for _, gold := range golden {
 		if got := normalizeAddr(gold.Addr); got != gold.Normal {
