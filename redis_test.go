@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"math"
+	"math/rand"
 	"net"
 	"os"
 	"strconv"
@@ -22,6 +23,13 @@ func init() {
 	}
 	testClient = NewClient(addr, time.Second, time.Second)
 	benchClient = NewClient(addr, 0, 0)
+
+	// make random keys vary
+	rand.Seed(time.Now().UnixNano())
+}
+
+func randomKey(prefix string) string {
+	return fmt.Sprintf("%s-%d", prefix, rand.Uint64())
 }
 
 func TestParseInt(t *testing.T) {
@@ -107,6 +115,50 @@ func TestReadError(t *testing.T) {
 	_, err := testClient.DEL("key")
 	if !errors.Is(err, io.EOF) {
 		t.Errorf("got error %v, want a EOF", err)
+	}
+}
+
+func TestRedisError(t *testing.T) {
+	key, value := randomKey("test"), []byte("abc")
+	newLen, err := testClient.APPEND(key, value)
+	if err != nil {
+		t.Fatalf("APPEND %q %q error: %s", key, value, err)
+	}
+	if newLen != int64(len(value)) {
+		t.Errorf("APPEND %q %q got length %d, want %d", key, value, newLen, len(value))
+	}
+
+	_, err = testClient.INCR(key)
+	switch e := err.(type) {
+	default:
+		t.Errorf("INC %q got error %v, want a RedisError", key, err)
+	case ServerError:
+		t.Log("got:", e)
+		if got := e.Prefix(); got != "ERR" {
+			t.Errorf(`error %q got prefix %q, want "ERR"`, err, got)
+		}
+	}
+
+	_, err = testClient.LINDEX(key, 42)
+	switch e := err.(type) {
+	default:
+		t.Errorf("LINDEX %q got error %v, want a RedisError", key, err)
+	case ServerError:
+		t.Log("got:", e)
+		if got := e.Prefix(); got != "WRONGTYPE" {
+			t.Errorf(`LINDEX %q error %q got prefix %q, want "WRONGTYPE"`, key, err, got)
+		}
+	}
+
+	_, err = testClient.LRANGE(key, 42, 99)
+	switch e := err.(type) {
+	default:
+		t.Errorf("LRANGE %q got error %v, want a RedisError", key, err)
+	case ServerError:
+		t.Log("got:", e)
+		if got := e.Prefix(); got != "WRONGTYPE" {
+			t.Errorf(`LRANGE %q error %q got prefix %q, want "WRONGTYPE"`, key, err, got)
+		}
 	}
 }
 

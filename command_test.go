@@ -1,18 +1,12 @@
 package redis
 
 import (
-	"fmt"
-	"math/rand"
 	"testing"
-	"time"
 )
 
-func init() {
-	rand.Seed(time.Now().UnixNano())
-}
-
 func TestKeyCRUD(t *testing.T) {
-	const key, value, update = "key1", "first-value", "second-value"
+	key := randomKey("test-key")
+	const value, update = "first-value", "second-value"
 
 	if err := testClient.SET(key, []byte(value)); err != nil {
 		t.Fatalf("SET %q %q got error %q", key, value, err)
@@ -44,7 +38,8 @@ func TestKeyCRUD(t *testing.T) {
 }
 
 func TestBytesKeyCRUD(t *testing.T) {
-	key, value, update := []byte("key1"), []byte("first-value"), []byte("second-value")
+	key := []byte(randomKey("test-key"))
+	value, update := []byte("first-value"), []byte("second-value")
 
 	if err := testClient.BytesSET(key, value); err != nil {
 		t.Fatalf("SET %q %q got error %q", key, value, err)
@@ -96,7 +91,7 @@ func TestKeyAbsent(t *testing.T) {
 }
 
 func TestListLeft(t *testing.T) {
-	key := fmt.Sprintf("test-list-%d", rand.Uint64())
+	key := randomKey("test-list")
 	const minus, zero, one = "-", "zero", "one"
 
 	if newLen, err := testClient.LPUSH(key, []byte(one)); err != nil {
@@ -134,7 +129,7 @@ func TestListLeft(t *testing.T) {
 }
 
 func TestListRight(t *testing.T) {
-	key := fmt.Sprintf("test-list-%d", rand.Uint64())
+	key := randomKey("test-list")
 	const minus, zero, one = "-", "zero", "one"
 
 	if newLen, err := testClient.RPUSH(key, []byte(one)); err != nil {
@@ -206,7 +201,8 @@ func TestNoSuchList(t *testing.T) {
 }
 
 func TestHashCRUD(t *testing.T) {
-	const key, field, value, update = "key2", "field1", "first-value", "second-value"
+	key := randomKey("test-hash")
+	const field, value, update = "field1", "first-value", "second-value"
 
 	if newField, err := testClient.HSET(key, field, []byte(value)); err != nil {
 		t.Fatalf("HSET %q %q %q got error %q", key, field, value, err)
@@ -243,7 +239,8 @@ func TestHashCRUD(t *testing.T) {
 }
 
 func TestBytesHashCRUD(t *testing.T) {
-	key, field, value, update := []byte("key2"), []byte("field1"), []byte("first-value"), []byte("second-value")
+	key := []byte(randomKey("test-hash"))
+	field, value, update := []byte("field1"), []byte("first-value"), []byte("second-value")
 
 	if newField, err := testClient.BytesHSET(key, field, value); err != nil {
 		t.Fatalf("HSET %q %q %q got error %q", key, field, value, err)
@@ -298,7 +295,7 @@ func TestHashAbsent(t *testing.T) {
 		t.Errorf("HDEL %q got true, want false", key)
 	}
 
-	key = "does exist"
+	key = randomKey("does exist")
 	_, err = testClient.HSETString(key, "another field", "arbitrary")
 	if err != nil {
 		t.Fatal("hash creation error:", err)
