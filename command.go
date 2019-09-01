@@ -81,6 +81,46 @@ func (c *Client) BytesDEL(key []byte) (bool, error) {
 	return removed != 0, err
 }
 
+// INCR executes <https://redis.io/commands/incr>.
+func (c *Client) INCR(key string) (newValue int64, err error) {
+	const prefix = "*2\r\n$4\r\nINCR\r\n$"
+	buf := append(writeBuffers.Get().([]byte)[:0], prefix...)
+	buf = appendString(buf, key)
+	newValue, err = c.intCmd(buf)
+	writeBuffers.Put(buf)
+	return
+}
+
+// BytesINCR executes <https://redis.io/commands/incr>.
+func (c *Client) BytesINCR(key []byte) (newValue int64, err error) {
+	const prefix = "*2\r\n$4\r\nINCR\r\n$"
+	buf := append(writeBuffers.Get().([]byte)[:0], prefix...)
+	buf = appendBytes(buf, key)
+	newValue, err = c.intCmd(buf)
+	writeBuffers.Put(buf)
+	return
+}
+
+// INCRBY executes <https://redis.io/commands/incrby>.
+func (c *Client) INCRBY(key string, increment int64) (newValue int64, err error) {
+	const prefix = "*2\r\n$6\r\nINCRBY\r\n$"
+	buf := append(writeBuffers.Get().([]byte)[:0], prefix...)
+	buf = appendStringInt(buf, key, increment)
+	newValue, err = c.intCmd(buf)
+	writeBuffers.Put(buf)
+	return
+}
+
+// BytesINCRBY executes <https://redis.io/commands/incrby>.
+func (c *Client) BytesINCRBY(key []byte, increment int64) (newValue int64, err error) {
+	const prefix = "*2\r\n$6\r\nINCRBY\r\n$"
+	buf := append(writeBuffers.Get().([]byte)[:0], prefix...)
+	buf = appendBytesInt(buf, key, increment)
+	newValue, err = c.intCmd(buf)
+	writeBuffers.Put(buf)
+	return
+}
+
 // APPEND executes <https://redis.io/commands/append>.
 func (c *Client) APPEND(key string, value []byte) (newLen int64, err error) {
 	const prefix = "*3\r\n$6\r\nAPPEND\r\n$"
