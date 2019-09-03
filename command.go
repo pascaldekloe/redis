@@ -263,6 +263,26 @@ func (c *Client) BytesRPOP(key []byte) (value []byte, err error) {
 	return
 }
 
+// LTRIM executes <https://redis.io/commands/ltrim>.
+func (c *Client) LTRIM(key string, start, stop int64) error {
+	const prefix = "*4\r\n$5\r\nLTRIM\r\n$"
+	buf := append(writeBuffers.Get().([]byte)[:0], prefix...)
+	buf = appendStringIntInt(buf, key, start, stop)
+	err := c.okCmd(buf)
+	writeBuffers.Put(buf)
+	return err
+}
+
+// BytesLTRIM executes <https://redis.io/commands/ltrim>.
+func (c *Client) BytesLTRIM(key []byte, start, stop int64) error {
+	const prefix = "*4\r\n$5\r\nLTRIM\r\n$"
+	buf := append(writeBuffers.Get().([]byte)[:0], prefix...)
+	buf = appendBytesIntInt(buf, key, start, stop)
+	err := c.okCmd(buf)
+	writeBuffers.Put(buf)
+	return err
+}
+
 // LSET executes <https://redis.io/commands/lset>.
 func (c *Client) LSET(key string, index int64, value []byte) error {
 	const prefix = "*4\r\n$4\r\nLSET\r\n$"

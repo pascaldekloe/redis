@@ -1,6 +1,9 @@
 package redis
 
-import "testing"
+import (
+	"fmt"
+	"testing"
+)
 
 func TestKeyCRUD(t *testing.T) {
 	t.Parallel()
@@ -256,6 +259,10 @@ func TestListAbsent(t *testing.T) {
 	} else if value != nil {
 		t.Errorf("RPOP %q got %q, want nil", key, value)
 	}
+
+	if err := testClient.LTRIM(key, 1, 1); err != nil {
+		t.Errorf("LTRIM %q 1 1 got error %q", key, err)
+	}
 }
 
 func TestListIndex(t *testing.T) {
@@ -265,7 +272,7 @@ func TestListIndex(t *testing.T) {
 	for _, value := range []string{"one", "two", "tree"} {
 		_, err := testClient.RPUSHString(key, value)
 		if err != nil {
-			t.Fatal(err)
+			t.Fatal("population error:", err)
 		}
 	}
 
@@ -308,6 +315,32 @@ func TestListIndex(t *testing.T) {
 		t.Errorf("LINDEX %q 3 got error %q", key, err)
 	} else if value != nil {
 		t.Errorf("LINDEX %q 3 got %q, want nil", key, value)
+	}
+}
+
+func TestListRemove(t *testing.T) {
+	t.Parallel()
+	key := randomKey("array")
+
+	for _, value := range []string{"0", "1", "2", "3", "4", "5"} {
+		_, err := testClient.RPUSHString(key, value)
+		if err != nil {
+			t.Fatal("population error:", err)
+		}
+	}
+
+	if err := testClient.LTRIM(key, 0, 4); err != nil {
+		t.Errorf("LTRIM %q 0 4 got error %q", key, err)
+	}
+	if err := testClient.BytesLTRIM([]byte(key), 1, -2); err != nil {
+		t.Errorf("LTRIM %q 0 4 got error %q", key, err)
+	}
+
+	const want = `["1" "2" "3"]`
+	if values, err := testClient.LRANGE(key, 0, -1); err != nil {
+		t.Fatal("lookup error:", err)
+	} else if got := fmt.Sprintf("%q", values); got != want {
+		t.Fatalf("got %s, want %s", got, want)
 	}
 }
 
