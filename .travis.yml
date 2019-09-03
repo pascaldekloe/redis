@@ -1,7 +1,0 @@
-language: go
-go:
- - "tip"
-env:
- - TEST_REDIS_ADDR="localhost"
-services:
- - "redis-server"
