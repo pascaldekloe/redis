@@ -10,5 +10,5 @@ jobs:
       - run:
           name: Unit Tests
           environment:
-            TEST_REDIS_ADDR: "localhost"
-          command: go test ./...
+            TEST_REDIS_ADDR: localhost
+          command: go -v test ./...
