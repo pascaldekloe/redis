@@ -91,6 +91,49 @@ func TestKeyAbsent(t *testing.T) {
 	}
 }
 
+func TestKeyModification(t *testing.T) {
+	t.Parallel()
+	key := randomKey("test")
+
+	if n, err := testClient.INCR(key); err != nil {
+		t.Errorf("INCR %q got error %q", key, err)
+	} else if n != 1 {
+		t.Errorf("INCR %q got %d, want 1", key, n)
+	}
+	if n, err := testClient.BytesINCR([]byte(key)); err != nil {
+		t.Errorf("INCR %q got error %q", key, err)
+	} else if n != 2 {
+		t.Errorf("INCR %q got %d, want 2", key, n)
+	}
+
+	if n, err := testClient.INCRBY(key, 1e9); err != nil {
+		t.Errorf("INCRBY %q 1000000000 got error %q", key, err)
+	} else if n != 1000000002 {
+		t.Errorf("INCRBY %q 1000000000 got %d, want 1000000002", key, n)
+	}
+	if n, err := testClient.BytesINCRBY([]byte(key), -1e9); err != nil {
+		t.Errorf("INCRBY %q 1000000000 got error %q", key, err)
+	} else if n != 2 {
+		t.Errorf("INCRBY %q -1000000000 got %d, want 2", key, n)
+	}
+
+	if newLen, err := testClient.APPEND(key, []byte("a")); err != nil {
+		t.Errorf(`APPEND %q "a" got error %q`, key, err)
+	} else if newLen != 2 {
+		t.Errorf(`APPEND %q "a" got %d, want 2`, key, newLen)
+	}
+	if newLen, err := testClient.APPENDString(key, "b"); err != nil {
+		t.Errorf(`APPEND %q "b" got error %q`, key, err)
+	} else if newLen != 3 {
+		t.Errorf(`APPEND %q "b" got %d, want 3`, key, newLen)
+	}
+	if newLen, err := testClient.BytesAPPEND([]byte(key), []byte("c")); err != nil {
+		t.Errorf(`APPEND %q "c" got error %q`, key, err)
+	} else if newLen != 4 {
+		t.Errorf(`APPEND %q "c" got %d, want 4`, key, newLen)
+	}
+}
+
 func TestListLeft(t *testing.T) {
 	t.Parallel()
 	key := randomKey("test-list")
@@ -128,6 +171,12 @@ func TestListLeft(t *testing.T) {
 	} else if string(value) != zero {
 		t.Errorf("LPOP %q got %q, want %q", key, value, zero)
 	}
+
+	if value, err := testClient.LLEN(key); err != nil {
+		t.Errorf("LLEN %q got error %q", key, err)
+	} else if value != 1 {
+		t.Errorf("LLEN %q got %d, want 1", key, value)
+	}
 }
 
 func TestListRight(t *testing.T) {
@@ -151,7 +200,7 @@ func TestListRight(t *testing.T) {
 		t.Errorf("RPUSH %q %q got len %d, want 3", key, minus, newLen)
 	}
 
-	if values, err := testClient.LRANGE(key, 0, 100); err != nil {
+	if values, err := testClient.BytesLRANGE([]byte(key), 0, 100); err != nil {
 		t.Errorf("LRANGE %q 0 100 got error %q", key, err)
 	} else if len(values) != 3 || string(values[0]) != one || string(values[1]) != zero || string(values[2]) != minus {
 		t.Fatalf("LRANGE %q 0 100 got %q, want [%q, %q, %q]", key, values, one, zero, minus)
@@ -167,9 +216,15 @@ func TestListRight(t *testing.T) {
 	} else if string(value) != zero {
 		t.Errorf("RPOP %q got %q, want %q", key, value, zero)
 	}
+
+	if value, err := testClient.BytesLLEN([]byte(key)); err != nil {
+		t.Errorf("LLEN %q got error %q", key, err)
+	} else if value != 1 {
+		t.Errorf("LLEN %q got %d, want 1", key, value)
+	}
 }
 
-func TestNoSuchList(t *testing.T) {
+func TestListAbsent(t *testing.T) {
 	const key = "doesn't exist"
 
 	if n, err := testClient.LLEN(key); err != nil {
@@ -200,6 +255,59 @@ func TestNoSuchList(t *testing.T) {
 		t.Errorf("RPOP %q got error %q", key, err)
 	} else if value != nil {
 		t.Errorf("RPOP %q got %q, want nil", key, value)
+	}
+}
+
+func TestListIndex(t *testing.T) {
+	t.Parallel()
+	key := randomKey("array")
+
+	for _, value := range []string{"one", "two", "tree"} {
+		_, err := testClient.RPUSHString(key, value)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := testClient.LSET(key, 0, []byte{'1'}); err != nil {
+		t.Errorf(`LSET %q 0 "1" got error %q`, key, err)
+	}
+	if err := testClient.LSETString(key, -2, "2"); err != nil {
+		t.Errorf(`LSET %q -2 "2" got error %q`, key, err)
+	}
+	if err := testClient.BytesLSET([]byte(key), 2, []byte{'3'}); err != nil {
+		t.Errorf(`LSET %q 2 "3" got error %q`, key, err)
+	}
+
+	switch err := testClient.LSET(key, 3, []byte{'x'}).(type) {
+	case ServerError:
+		if want := "ERR index out of range"; string(err) != want {
+			t.Errorf("LSET got error %q, want %q", err, want)
+		}
+	default:
+		t.Errorf("LSET out of range got error %q, want ServerError", err)
+	}
+
+	if value, err := testClient.LINDEX(key, -3); err != nil {
+		t.Errorf(`LINDEX %q -3 got error %q`, key, err)
+	} else if string(value) != "1" {
+		t.Errorf(`LINDEX %q -3 got %q, want "1"`, key, value)
+	}
+	if value, err := testClient.LINDEX(key, 1); err != nil {
+		t.Errorf(`LINDEX %q 1 got error %q`, key, err)
+	} else if string(value) != "2" {
+		t.Errorf(`LINDEX %q 1 got %q, want "2"`, key, value)
+	}
+	if value, err := testClient.BytesLINDEX([]byte(key), -1); err != nil {
+		t.Errorf(`LINDEX %q -1 got error %q`, key, err)
+	} else if string(value) != "3" {
+		t.Errorf(`LINDEX %q -1 got %q, want "3"`, key, value)
+	}
+
+	if value, err := testClient.LINDEX(key, 3); err != nil {
+		t.Errorf("LINDEX %q 3 got error %q", key, err)
+	} else if value != nil {
+		t.Errorf("LINDEX %q 3 got %q, want nil", key, value)
 	}
 }
 
