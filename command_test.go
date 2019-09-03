@@ -1,10 +1,9 @@
 package redis
 
-import (
-	"testing"
-)
+import "testing"
 
 func TestKeyCRUD(t *testing.T) {
+	t.Parallel()
 	key := randomKey("test-key")
 	const value, update = "first-value", "second-value"
 
@@ -38,6 +37,7 @@ func TestKeyCRUD(t *testing.T) {
 }
 
 func TestBytesKeyCRUD(t *testing.T) {
+	t.Parallel()
 	key := []byte(randomKey("test-key"))
 	value, update := []byte("first-value"), []byte("second-value")
 
@@ -71,6 +71,7 @@ func TestBytesKeyCRUD(t *testing.T) {
 }
 
 func TestKeyAbsent(t *testing.T) {
+	t.Parallel()
 	const key = "doesn't exist"
 
 	bytes, err := testClient.GET(key)
@@ -91,6 +92,7 @@ func TestKeyAbsent(t *testing.T) {
 }
 
 func TestListLeft(t *testing.T) {
+	t.Parallel()
 	key := randomKey("test-list")
 	const minus, zero, one = "-", "zero", "one"
 
@@ -129,6 +131,7 @@ func TestListLeft(t *testing.T) {
 }
 
 func TestListRight(t *testing.T) {
+	t.Parallel()
 	key := randomKey("test-list")
 	const minus, zero, one = "-", "zero", "one"
 
@@ -201,6 +204,7 @@ func TestNoSuchList(t *testing.T) {
 }
 
 func TestHashCRUD(t *testing.T) {
+	t.Parallel()
 	key := randomKey("test-hash")
 	const field, value, update = "field1", "first-value", "second-value"
 
@@ -239,6 +243,7 @@ func TestHashCRUD(t *testing.T) {
 }
 
 func TestBytesHashCRUD(t *testing.T) {
+	t.Parallel()
 	key := []byte(randomKey("test-hash"))
 	field, value, update := []byte("field1"), []byte("first-value"), []byte("second-value")
 
@@ -277,6 +282,7 @@ func TestBytesHashCRUD(t *testing.T) {
 }
 
 func TestHashAbsent(t *testing.T) {
+	t.Parallel()
 	key, field := "doesn't exist", "also not set"
 
 	bytes, err := testClient.HGET(key, field)
