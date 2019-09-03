@@ -103,7 +103,7 @@ func (c *Client) BytesINCR(key []byte) (newValue int64, err error) {
 
 // INCRBY executes <https://redis.io/commands/incrby>.
 func (c *Client) INCRBY(key string, increment int64) (newValue int64, err error) {
-	const prefix = "*2\r\n$6\r\nINCRBY\r\n$"
+	const prefix = "*3\r\n$6\r\nINCRBY\r\n$"
 	buf := append(writeBuffers.Get().([]byte)[:0], prefix...)
 	buf = appendStringInt(buf, key, increment)
 	newValue, err = c.intCmd(buf)
@@ -113,7 +113,7 @@ func (c *Client) INCRBY(key string, increment int64) (newValue int64, err error)
 
 // BytesINCRBY executes <https://redis.io/commands/incrby>.
 func (c *Client) BytesINCRBY(key []byte, increment int64) (newValue int64, err error) {
-	const prefix = "*2\r\n$6\r\nINCRBY\r\n$"
+	const prefix = "*3\r\n$6\r\nINCRBY\r\n$"
 	buf := append(writeBuffers.Get().([]byte)[:0], prefix...)
 	buf = appendBytesInt(buf, key, increment)
 	newValue, err = c.intCmd(buf)
@@ -275,7 +275,7 @@ func (c *Client) LSET(key string, index int64, value []byte) error {
 
 // LSETString executes <https://redis.io/commands/lset>.
 func (c *Client) LSETString(key string, index int64, value string) error {
-	const prefix = "*4\r\n$4\r\nSET\r\n$"
+	const prefix = "*4\r\n$4\r\nLSET\r\n$"
 	buf := append(writeBuffers.Get().([]byte)[:0], prefix...)
 	buf = appendStringIntString(buf, key, index, value)
 	err := c.okCmd(buf)
