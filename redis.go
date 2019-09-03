@@ -11,9 +11,10 @@ import (
 	"time"
 )
 
+// ErrConnLost signals connection loss to response queue.
 var errConnLost = errors.New("redis: connection lost while awaiting response")
 
-// errProtocol signals invalid RESP reception.
+// ErrProtocol signals invalid RESP reception.
 var errProtocol = errors.New("redis: protocol violation")
 
 // ErrNull represents the null response.
@@ -196,7 +197,7 @@ func (c *Client) manage() {
 		// command submission blocked
 
 		for len(c.queue) != 0 {
-			r.Reset(errorReader{errConnLost})
+			r.Reset(connLostReader{})
 			(<-c.queue).parse(r)
 		}
 	}
@@ -219,10 +220,10 @@ func (c *Client) notifyOffline(ch chan error) {
 	}
 }
 
-type errorReader struct{ error }
+type connLostReader struct{}
 
-func (r errorReader) Read([]byte) (int, error) {
-	return 0, r.error
+func (r connLostReader) Read([]byte) (int, error) {
+	return 0, errConnLost
 }
 
 type parser interface {
@@ -259,7 +260,7 @@ func (p okParser) parse(r *bufio.Reader) bool {
 		return true
 
 	default:
-		p <- fmt.Errorf("%w; unexpected first byte %q on line %q", errProtocol, first, line)
+		p <- firstByteError(first, line)
 		return false
 	}
 }
@@ -286,7 +287,7 @@ func (p intParser) parse(r *bufio.Reader) bool {
 		return true
 
 	default:
-		p <- intResponse{Err: fmt.Errorf("%w; unexpected first byte %q on line %q", errProtocol, first, line)}
+		p <- intResponse{Err: firstByteError(first, line)}
 		return false
 	}
 }
@@ -310,7 +311,7 @@ func (p bulkParser) parse(r *bufio.Reader) bool {
 		p <- bulkResponse{Err: ServerError(line)}
 		return true
 	default:
-		p <- bulkResponse{Err: fmt.Errorf("%w; unexpected first byte %q on line %q", errProtocol, first, line)}
+		p <- bulkResponse{Err: firstByteError(first, line)}
 		return false
 	}
 
@@ -348,7 +349,7 @@ func (p arrayParser) parse(r *bufio.Reader) bool {
 		p <- arrayResponse{Err: ServerError(line)}
 		return true
 	default:
-		p <- arrayResponse{Err: fmt.Errorf("%w; unexpected first byte %q on line %q", errProtocol, first, line)}
+		p <- arrayResponse{Err: firstByteError(first, line)}
 		return false
 	}
 
@@ -382,13 +383,17 @@ func (p arrayParser) parse(r *bufio.Reader) bool {
 			// copy line slice
 			array[i] = append(make([]byte, 0, len(line)), line...)
 		default:
-			p <- arrayResponse{Err: fmt.Errorf("%w; unexpected first byte %q on array element %d line %q", errProtocol, first, i, line)}
+			p <- arrayResponse{Err: firstByteError(first, line)}
 			return false
 		}
 	}
 
 	p <- arrayResponse{Array: array}
 	return true
+}
+
+func firstByteError(first byte, line []byte) error {
+	return fmt.Errorf("%w; unexpected first byte %#x in line %q", errProtocol, first, string(first)+string(line))
 }
 
 // WARNING: line valid only until the next read on r.

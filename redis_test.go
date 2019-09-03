@@ -82,16 +82,17 @@ func TestUnavailable(t *testing.T) {
 func TestWriteError(t *testing.T) {
 	timeout := time.After(time.Second)
 	select {
-	case <-timeout:
-		t.Fatal("could not aquire write sempahore")
 	case conn := <-testClient.writeSem:
 		conn.Close()
+
 		select {
-		case <-timeout:
-			t.Fatal("could not release write sempahore")
 		case testClient.writeSem <- conn:
 			break
+		case <-timeout:
+			t.Fatal("write sempahore release timeout")
 		}
+	case <-timeout:
+		t.Fatal("write sempahore aquire timeout")
 	}
 
 	_, err := testClient.DEL("key")
@@ -108,8 +109,6 @@ func TestWriteError(t *testing.T) {
 func TestReadError(t *testing.T) {
 	timeout := time.After(time.Second)
 	select {
-	case <-timeout:
-		t.Fatal("could not aquire write sempahore")
 	case conn := <-testClient.writeSem:
 		c, ok := conn.(interface{ CloseRead() error })
 		if ok {
@@ -117,15 +116,16 @@ func TestReadError(t *testing.T) {
 		}
 
 		select {
-		case <-timeout:
-			t.Fatal("could not release write sempahore")
 		case testClient.writeSem <- conn:
-			break
-		}
+			if !ok {
+				t.Skip("no CloseRead method on connection")
+			}
 
-		if !ok {
-			t.Skip("no CloseRead method on connection")
+		case <-timeout:
+			t.Fatal("write sempahore release timeout")
 		}
+	case <-timeout:
+		t.Fatal("write sempahore aquire timeout")
 	}
 
 	_, err := testClient.DEL("key")
@@ -175,6 +175,14 @@ func TestRedisError(t *testing.T) {
 		if got := e.Prefix(); got != "WRONGTYPE" {
 			t.Errorf(`LRANGE %q error %q got prefix %q, want "WRONGTYPE"`, key, err, got)
 		}
+	}
+}
+
+func TestFirstByteError(t *testing.T) {
+	got := firstByteError('?', []byte("abc\r\n")).Error()
+	want := `redis: protocol violation; unexpected first byte 0x3f in line "?abc\r\n"`
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
 	}
 }
 
