@@ -306,7 +306,10 @@ func (p bulkParser) parse(r *bufio.Reader) bool {
 
 	switch first {
 	case '$':
-		break
+		var resp bulkResponse
+		resp.Bytes, resp.Err = readBulk(r, line)
+		p <- resp
+		return resp.Err == nil
 	case '-':
 		p <- bulkResponse{Err: ServerError(line)}
 		return true
@@ -314,20 +317,6 @@ func (p bulkParser) parse(r *bufio.Reader) bool {
 		p <- bulkResponse{Err: firstByteError(first, line)}
 		return false
 	}
-
-	size := ParseInt(line)
-	if size < 0 {
-		p <- bulkResponse{Bytes: nil}
-		return true
-	}
-
-	bytes, err := readNCRLF(r, size)
-	if err != nil {
-		p <- bulkResponse{Err: err}
-		return false
-	}
-	p <- bulkResponse{Bytes: bytes, Err: err}
-	return true
 }
 
 type arrayResponse struct {
@@ -370,11 +359,7 @@ func (p arrayParser) parse(r *bufio.Reader) bool {
 
 		switch first {
 		case '$':
-			size := ParseInt(line)
-			if size < 0 {
-				break // null
-			}
-			array[i], err = readNCRLF(r, size)
+			array[i], err = readBulk(r, line)
 			if err != nil {
 				p <- arrayResponse{Err: err}
 				return false
@@ -413,9 +398,14 @@ func readCRLF(r *bufio.Reader) (first byte, line []byte, err error) {
 	return line[0], line[1:end], nil
 }
 
-func readNCRLF(r *bufio.Reader, n int64) ([]byte, error) {
-	buf := make([]byte, n)
-	if n != 0 {
+func readBulk(r *bufio.Reader, line []byte) ([]byte, error) {
+	size := ParseInt(line)
+	if size < 0 {
+		return nil, nil
+	}
+
+	buf := make([]byte, size)
+	if size != 0 {
 		done, err := r.Read(buf)
 		for done < len(buf) && err == nil {
 			var more int
@@ -426,6 +416,7 @@ func readNCRLF(r *bufio.Reader, n int64) ([]byte, error) {
 			return nil, err
 		}
 	}
+
 	_, err := r.Discard(2) // skip CRLF
 	return buf, err
 }
