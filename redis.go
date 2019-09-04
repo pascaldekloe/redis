@@ -415,17 +415,17 @@ func readCRLF(r *bufio.Reader) (first byte, line []byte, err error) {
 
 func readNCRLF(r *bufio.Reader, n int64) ([]byte, error) {
 	buf := make([]byte, n)
-	if n == 0 {
-		return buf, nil
+	if n != 0 {
+		done, err := r.Read(buf)
+		for done < len(buf) && err == nil {
+			var more int
+			more, err = r.Read(buf[done:])
+			done += more
+		}
+		if err != nil {
+			return nil, err
+		}
 	}
-	done, err := r.Read(buf)
-	for done < len(buf) && err == nil {
-		var more int
-		more, err = r.Read(buf[done:])
-		done += more
-	}
-	if err == nil {
-		_, err = r.Discard(2) // skip CRLF
-	}
+	_, err := r.Discard(2) // skip CRLF
 	return buf, err
 }

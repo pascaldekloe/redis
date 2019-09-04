@@ -2,6 +2,7 @@ package redis
 
 import (
 	"fmt"
+	"reflect"
 	"testing"
 )
 
@@ -42,7 +43,7 @@ func TestKeyCRUD(t *testing.T) {
 func TestBytesKeyCRUD(t *testing.T) {
 	t.Parallel()
 	key := []byte(randomKey("test-key"))
-	value, update := []byte("first-value"), []byte("second-value")
+	value, update := []byte(""), []byte("second-value")
 
 	if err := testClient.BytesSET(key, value); err != nil {
 		t.Fatalf("SET %q %q got error %q", key, value, err)
@@ -50,7 +51,7 @@ func TestBytesKeyCRUD(t *testing.T) {
 
 	if bytes, err := testClient.BytesGET(key); err != nil {
 		t.Errorf("GET %q got error %q", key, err)
-	} else if string(bytes) != string(value) {
+	} else if !reflect.DeepEqual(bytes, value) {
 		t.Errorf(`GET %q got %q, want %q`, key, bytes, value)
 	}
 
@@ -59,7 +60,7 @@ func TestBytesKeyCRUD(t *testing.T) {
 	} else {
 		if bytes, err := testClient.BytesGET(key); err != nil {
 			t.Errorf("GET %q got error %q", key, err)
-		} else if string(bytes) != string(update) {
+		} else if !reflect.DeepEqual(bytes, update) {
 			t.Errorf(`GET %q got %q, want %q`, key, bytes, update)
 		}
 	}
@@ -362,7 +363,7 @@ func TestHashCRUD(t *testing.T) {
 	}
 
 	if newField, err := testClient.HSETString(key, field, update); err != nil {
-		t.Errorf("HSET %q %q %q update got error %q", key, field, value, err)
+		t.Errorf("HSET %q %q %q update got error %q", key, field, update, err)
 	} else {
 		if newField {
 			t.Errorf("HSET %q %q %q update got newField true", key, field, value)
@@ -386,7 +387,7 @@ func TestHashCRUD(t *testing.T) {
 func TestBytesHashCRUD(t *testing.T) {
 	t.Parallel()
 	key := []byte(randomKey("test-hash"))
-	field, value, update := []byte("field1"), []byte("first-value"), []byte("second-value")
+	field, value, update := []byte("field1"), []byte(""), []byte("second-value")
 
 	if newField, err := testClient.BytesHSET(key, field, value); err != nil {
 		t.Fatalf("HSET %q %q %q got error %q", key, field, value, err)
@@ -396,19 +397,19 @@ func TestBytesHashCRUD(t *testing.T) {
 
 	if bytes, err := testClient.BytesHGET(key, field); err != nil {
 		t.Errorf("HGET %q %q got error %q", key, field, err)
-	} else if string(bytes) != string(value) {
+	} else if !reflect.DeepEqual(bytes, value) {
 		t.Errorf(`HGET %q %q got %q, want %q`, key, field, bytes, value)
 	}
 
 	if newField, err := testClient.BytesHSET(key, field, update); err != nil {
-		t.Errorf("HSET %q %q %q update got error %q", key, field, value, err)
+		t.Errorf("HSET %q %q %q update got error %q", key, field, update, err)
 	} else {
 		if newField {
 			t.Errorf("HSET %q %q %q update got newField true", key, field, value)
 		}
 		if bytes, err := testClient.BytesHGET(key, field); err != nil {
 			t.Errorf("HGET %q %q got error %q", key, field, err)
-		} else if string(bytes) != string(update) {
+		} else if !reflect.DeepEqual(bytes, update) {
 			t.Errorf(`HGET %q %q got %q, want %q`, key, field, bytes, update)
 		}
 	}
