@@ -1,4 +1,5 @@
-// Package redis provides Redis serice access.
+// Package redis provides Redis service access. All communication is fully
+// asynchronous. See https://redis.io/topics/pipelining for details.
 package redis
 
 import (
@@ -9,6 +10,17 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+)
+
+// Fixed Settings
+const (
+	// IPv6 minimum MTU of 1280 bytes, minus a 40 byte IP header,
+	// minus a 32 byte TCP header (with timestamps).
+	conservativeMSS = 1208
+
+	// Number of pending requests per network protocol.
+	queueSizeTCP  = 128
+	queueSizeUnix = 512
 )
 
 // ErrConnLost signals connection loss to response queue.
@@ -88,7 +100,7 @@ func normalizeAddr(s string) string {
 	return net.JoinHostPort(host, port)
 }
 
-// Client provides command exectuion for a Redis service.
+// Client provides command execution for a Redis service.
 // Multiple goroutines may invoke methods on a Client simultaneously.
 type Client struct {
 	// Normalized server address in use. This field is read-only.
@@ -126,9 +138,9 @@ func NewClient(addr string, timeout, connectTimeout time.Duration) *Client {
 	if connectTimeout == 0 {
 		connectTimeout = time.Second
 	}
-	queueSize := 128
+	queueSize := queueSizeTCP
 	if isUnixAddr(addr) {
-		queueSize = 512
+		queueSize = queueSizeUnix
 	}
 
 	c := &Client{
@@ -171,7 +183,7 @@ func (c *Client) manage() {
 		// release command submission
 		c.writeSem <- conn
 
-		r := bufio.NewReader(conn)
+		r := bufio.NewReaderSize(conn, conservativeMSS)
 		for {
 			select {
 			case response := <-c.queue:
@@ -246,21 +258,17 @@ func (p okParser) parse(r *bufio.Reader) bool {
 	case err != nil:
 		p <- err
 		return false
-
 	case first == '+' && len(line) == 2 && line[0] == 'O' && line[1] == 'K':
 		p <- nil
 		return true
-
 	case first == '$' && len(line) == 2 && line[0] == '-' && line[1] == '1':
 		p <- errNull
 		return true
-
 	case first == '-':
 		p <- ServerError(line)
 		return true
-
 	default:
-		p <- firstByteError(first, line)
+		p <- fmt.Errorf("%w; unexpected line %.40q", errProtocol, append([]byte{first}, line...))
 		return false
 	}
 }
@@ -272,20 +280,16 @@ type intResponse struct {
 
 func (p intParser) parse(r *bufio.Reader) bool {
 	first, line, err := readCRLF(r)
-	if err != nil {
+	switch {
+	case err != nil:
 		p <- intResponse{Err: err}
 		return false
-	}
-
-	switch first {
-	case ':':
+	case first == ':':
 		p <- intResponse{Int: ParseInt(line)}
 		return true
-
-	case '-':
+	case first == '-':
 		p <- intResponse{Err: ServerError(line)}
 		return true
-
 	default:
 		p <- intResponse{Err: firstByteError(first, line)}
 		return false
@@ -299,18 +303,15 @@ type bulkResponse struct {
 
 func (p bulkParser) parse(r *bufio.Reader) bool {
 	first, line, err := readCRLF(r)
-	if err != nil {
+	switch {
+	case err != nil:
 		p <- bulkResponse{Err: err}
 		return false
-	}
-
-	switch first {
-	case '$':
-		var resp bulkResponse
-		resp.Bytes, resp.Err = readBulk(r, line)
-		p <- resp
-		return resp.Err == nil
-	case '-':
+	case first == '$':
+		bytes, err := readBulk(r, line)
+		p <- bulkResponse{Bytes: bytes, Err: err}
+		return err == nil
+	case first == '-':
 		p <- bulkResponse{Err: ServerError(line)}
 		return true
 	default:
@@ -326,15 +327,13 @@ type arrayResponse struct {
 
 func (p arrayParser) parse(r *bufio.Reader) bool {
 	first, line, err := readCRLF(r)
-	if err != nil {
+	switch {
+	case err != nil:
 		p <- arrayResponse{Err: err}
 		return false
-	}
-
-	switch first {
-	case '*':
+	case first == '*':
 		break
-	case '-':
+	case first == '-':
 		p <- arrayResponse{Err: ServerError(line)}
 		return true
 	default:
@@ -342,31 +341,25 @@ func (p arrayParser) parse(r *bufio.Reader) bool {
 		return false
 	}
 
-	size := ParseInt(line)
-	if size < 0 {
-		p <- arrayResponse{Array: nil}
-		return true
+	var array [][]byte
+	// negative means null–zero must be non-nil
+	if size := ParseInt(line); size >= 0 {
+		array = make([][]byte, size)
 	}
-	array := make([][]byte, size)
 
 	// parse elements
 	for i := range array {
 		first, line, err := readCRLF(r)
-		if err != nil {
+		switch {
+		case err != nil:
 			p <- arrayResponse{Err: err}
 			return false
-		}
-
-		switch first {
-		case '$':
+		case first == '$':
 			array[i], err = readBulk(r, line)
 			if err != nil {
 				p <- arrayResponse{Err: err}
 				return false
 			}
-		case ':':
-			// copy line slice
-			array[i] = append(make([]byte, 0, len(line)), line...)
 		default:
 			p <- arrayResponse{Err: firstByteError(first, line)}
 			return false
@@ -378,26 +371,27 @@ func (p arrayParser) parse(r *bufio.Reader) bool {
 }
 
 func firstByteError(first byte, line []byte) error {
-	return fmt.Errorf("%w; unexpected first byte %#x in line %q", errProtocol, first, string(first)+string(line))
+	return fmt.Errorf("%w; unexpected first byte %#x in line %.40q", errProtocol, first, append([]byte{first}, line...))
 }
 
-// WARNING: line valid only until the next read on r.
+// WARNING: line only valid until the next read on r.
 func readCRLF(r *bufio.Reader) (first byte, line []byte, err error) {
 	line, err = r.ReadSlice('\n')
 	if err != nil {
 		if err == bufio.ErrBufferFull {
-			err = fmt.Errorf("%w; CRLF string exceeds %d bytes: %q", errProtocol, r.Size(), line)
+			err = fmt.Errorf("%w; CRLF line exceeds %d bytes: %.40q…", errProtocol, r.Size(), line)
 		}
-		return
+		return 0, nil, err
 	}
 
 	end := len(line) - 2
 	if end <= 0 || line[end] != '\r' {
-		return 0, nil, fmt.Errorf("%w; got line %q", errProtocol, line)
+		return 0, nil, fmt.Errorf("%w; CRLF empty or preceded by LF %q", errProtocol, line)
 	}
 	return line[0], line[1:end], nil
 }
 
+// ReadBulk continues with line after a '$' was read.
 func readBulk(r *bufio.Reader, line []byte) ([]byte, error) {
 	size := ParseInt(line)
 	if size < 0 {

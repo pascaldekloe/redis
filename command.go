@@ -199,10 +199,10 @@ func (c *Client) BytesLINDEX(key []byte, index int64) (value []byte, err error) 
 
 // LRANGE executes <https://redis.io/commands/lrange>.
 // The return is empty if key does not exist.
-func (c *Client) LRANGE(key string, start, end int64) (values [][]byte, err error) {
+func (c *Client) LRANGE(key string, start, stop int64) (values [][]byte, err error) {
 	const prefix = "*4\r\n$6\r\nLRANGE\r\n$"
 	buf := append(writeBuffers.Get().([]byte)[:0], prefix...)
-	buf = appendStringIntInt(buf, key, start, end)
+	buf = appendStringIntInt(buf, key, start, stop)
 	values, err = c.arrayCmd(buf)
 	writeBuffers.Put(buf)
 	return values, err
@@ -210,10 +210,10 @@ func (c *Client) LRANGE(key string, start, end int64) (values [][]byte, err erro
 
 // BytesLRANGE executes <https://redis.io/commands/lrange>.
 // The return is empty if key does not exist.
-func (c *Client) BytesLRANGE(key []byte, start, end int64) (values [][]byte, err error) {
+func (c *Client) BytesLRANGE(key []byte, start, stop int64) (values [][]byte, err error) {
 	const prefix = "*4\r\n$6\r\nLRANGE\r\n$"
 	buf := append(writeBuffers.Get().([]byte)[:0], prefix...)
-	buf = appendBytesIntInt(buf, key, start, end)
+	buf = appendBytesIntInt(buf, key, start, stop)
 	values, err = c.arrayCmd(buf)
 	writeBuffers.Put(buf)
 	return values, err
