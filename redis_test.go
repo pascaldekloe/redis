@@ -187,7 +187,13 @@ func TestFirstByteError(t *testing.T) {
 }
 
 func BenchmarkSimpleString(b *testing.B) {
-	const key = "bench-key"
+	key := randomKey("bench")
+	defer func() {
+		if _, err := benchClient.DEL(key); err != nil {
+			b.Error("cleanup error:", err)
+		}
+	}()
+
 	value := make([]byte, 8)
 	b.Run("sequential", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
@@ -208,7 +214,8 @@ func BenchmarkSimpleString(b *testing.B) {
 }
 
 func BenchmarkInteger(b *testing.B) {
-	const key = "bench-key"
+	key := randomKey("bench")
+
 	b.Run("sequential", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			if _, err := benchClient.DEL(key); err != nil {
@@ -228,9 +235,15 @@ func BenchmarkInteger(b *testing.B) {
 }
 
 func BenchmarkBulkString(b *testing.B) {
-	const key = "bench-key"
-	for _, size := range []int{8, 200, 1000} {
-		b.Run(fmt.Sprintf("%dbyte", size), func(b *testing.B) {
+	key := randomKey("bench")
+	defer func() {
+		if _, err := benchClient.DEL(key); err != nil {
+			b.Error("cleanup error:", err)
+		}
+	}()
+
+	for _, size := range []int{1, 144, 20_736} {
+		b.Run(fmt.Sprintf("%dB", size), func(b *testing.B) {
 			if err := benchClient.SET(key, make([]byte, size)); err != nil {
 				b.Fatal("population error:", err)
 			}
@@ -264,18 +277,22 @@ func BenchmarkBulkString(b *testing.B) {
 }
 
 func BenchmarkArray(b *testing.B) {
-	const key = "bench-array"
+	key := randomKey("bench")
 	defer func() {
 		if _, err := benchClient.DEL(key); err != nil {
-			b.Fatal("cleanup error:", err)
+			b.Error("cleanup error:", err)
 		}
 	}()
 
-	for _, size := range []int64{2, 12, 144} {
-		b.Run(fmt.Sprintf("%dvalues", size), func(b *testing.B) {
-			for n, err := benchClient.LLEN(key); n < size; n, err = benchClient.RPUSHString(key, "some-value") {
+	for _, size := range []int64{1, 12, 144} {
+		b.Run(fmt.Sprintf("%d×8B", size), func(b *testing.B) {
+			for {
+				n, err := benchClient.RPUSH(key, make([]byte, 8))
 				if err != nil {
 					b.Fatal("population error:", err)
+				}
+				if n >= size {
+					break
 				}
 			}
 
@@ -284,7 +301,8 @@ func BenchmarkArray(b *testing.B) {
 					values, err := benchClient.LRANGE(key, 0, size-1)
 					if err != nil {
 						b.Fatal("error:", err)
-					} else if int64(len(values)) != size {
+					}
+					if int64(len(values)) != size {
 						b.Fatalf("got %d values", len(values))
 					}
 				}
@@ -295,7 +313,8 @@ func BenchmarkArray(b *testing.B) {
 						values, err := benchClient.LRANGE(key, 0, size-1)
 						if err != nil {
 							b.Fatal("error:", err)
-						} else if int64(len(values)) != size {
+						}
+						if int64(len(values)) != size {
 							b.Fatalf("got %d values", len(values))
 						}
 					}
