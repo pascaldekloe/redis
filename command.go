@@ -24,9 +24,7 @@ func writeBuffer(prefix string) []byte {
 func (c *Client) GET(key string) (value []byte, err error) {
 	buf := writeBuffer("*2\r\n$3\r\nGET\r\n$")
 	buf = appendString(buf, key)
-	value, err = c.bulkCmd(buf)
-	writeBuffers.Put(&buf)
-	return
+	return c.bulkCmd(buf)
 }
 
 // BytesGET executes <https://redis.io/commands/get>.
@@ -34,36 +32,28 @@ func (c *Client) GET(key string) (value []byte, err error) {
 func (c *Client) BytesGET(key []byte) (value []byte, err error) {
 	buf := writeBuffer("*2\r\n$3\r\nGET\r\n$")
 	buf = appendBytes(buf, key)
-	value, err = c.bulkCmd(buf)
-	writeBuffers.Put(&buf)
-	return
+	return c.bulkCmd(buf)
 }
 
 // SET executes <https://redis.io/commands/set>.
 func (c *Client) SET(key string, value []byte) error {
 	buf := writeBuffer("*3\r\n$3\r\nSET\r\n$")
 	buf = appendStringBytes(buf, key, value)
-	err := c.okCmd(buf)
-	writeBuffers.Put(&buf)
-	return err
+	return c.okCmd(buf)
 }
 
 // BytesSET executes <https://redis.io/commands/set>.
 func (c *Client) BytesSET(key, value []byte) error {
 	buf := writeBuffer("*3\r\n$3\r\nSET\r\n$")
 	buf = appendBytesBytes(buf, key, value)
-	err := c.okCmd(buf)
-	writeBuffers.Put(&buf)
-	return err
+	return c.okCmd(buf)
 }
 
 // SETString executes <https://redis.io/commands/set>.
 func (c *Client) SETString(key, value string) error {
 	buf := writeBuffer("*3\r\n$3\r\nSET\r\n$")
 	buf = appendStringString(buf, key, value)
-	err := c.okCmd(buf)
-	writeBuffers.Put(&buf)
-	return err
+	return c.okCmd(buf)
 }
 
 // DEL executes <https://redis.io/commands/del>.
@@ -71,7 +61,6 @@ func (c *Client) DEL(key string) (bool, error) {
 	buf := writeBuffer("*2\r\n$3\r\nDEL\r\n$")
 	buf = appendString(buf, key)
 	removed, err := c.intCmd(buf)
-	writeBuffers.Put(&buf)
 	return removed != 0, err
 }
 
@@ -80,7 +69,6 @@ func (c *Client) BytesDEL(key []byte) (bool, error) {
 	buf := writeBuffer("*2\r\n$3\r\nDEL\r\n$")
 	buf = appendBytes(buf, key)
 	removed, err := c.intCmd(buf)
-	writeBuffers.Put(&buf)
 	return removed != 0, err
 }
 
@@ -88,63 +76,49 @@ func (c *Client) BytesDEL(key []byte) (bool, error) {
 func (c *Client) INCR(key string) (newValue int64, err error) {
 	buf := writeBuffer("*2\r\n$4\r\nINCR\r\n$")
 	buf = appendString(buf, key)
-	newValue, err = c.intCmd(buf)
-	writeBuffers.Put(&buf)
-	return
+	return c.intCmd(buf)
 }
 
 // BytesINCR executes <https://redis.io/commands/incr>.
 func (c *Client) BytesINCR(key []byte) (newValue int64, err error) {
 	buf := writeBuffer("*2\r\n$4\r\nINCR\r\n$")
 	buf = appendBytes(buf, key)
-	newValue, err = c.intCmd(buf)
-	writeBuffers.Put(&buf)
-	return
+	return c.intCmd(buf)
 }
 
 // INCRBY executes <https://redis.io/commands/incrby>.
 func (c *Client) INCRBY(key string, increment int64) (newValue int64, err error) {
 	buf := writeBuffer("*3\r\n$6\r\nINCRBY\r\n$")
 	buf = appendStringInt(buf, key, increment)
-	newValue, err = c.intCmd(buf)
-	writeBuffers.Put(&buf)
-	return
+	return c.intCmd(buf)
 }
 
 // BytesINCRBY executes <https://redis.io/commands/incrby>.
 func (c *Client) BytesINCRBY(key []byte, increment int64) (newValue int64, err error) {
 	buf := writeBuffer("*3\r\n$6\r\nINCRBY\r\n$")
 	buf = appendBytesInt(buf, key, increment)
-	newValue, err = c.intCmd(buf)
-	writeBuffers.Put(&buf)
-	return
+	return c.intCmd(buf)
 }
 
 // APPEND executes <https://redis.io/commands/append>.
 func (c *Client) APPEND(key string, value []byte) (newLen int64, err error) {
 	buf := writeBuffer("*3\r\n$6\r\nAPPEND\r\n$")
 	buf = appendStringBytes(buf, key, value)
-	newLen, err = c.intCmd(buf)
-	writeBuffers.Put(&buf)
-	return
+	return c.intCmd(buf)
 }
 
 // BytesAPPEND executes <https://redis.io/commands/append>.
 func (c *Client) BytesAPPEND(key, value []byte) (newLen int64, err error) {
 	buf := writeBuffer("*3\r\n$6\r\nAPPEND\r\n$")
 	buf = appendBytesBytes(buf, key, value)
-	newLen, err = c.intCmd(buf)
-	writeBuffers.Put(&buf)
-	return
+	return c.intCmd(buf)
 }
 
 // APPENDString executes <https://redis.io/commands/append>.
 func (c *Client) APPENDString(key, value string) (newLen int64, err error) {
 	buf := writeBuffer("*3\r\n$6\r\nAPPEND\r\n$")
 	buf = appendStringString(buf, key, value)
-	newLen, err = c.intCmd(buf)
-	writeBuffers.Put(&buf)
-	return
+	return c.intCmd(buf)
 }
 
 // LLEN executes <https://redis.io/commands/llen>.
@@ -152,9 +126,7 @@ func (c *Client) APPENDString(key, value string) (newLen int64, err error) {
 func (c *Client) LLEN(key string) (int64, error) {
 	buf := writeBuffer("*2\r\n$4\r\nLLEN\r\n$")
 	buf = appendString(buf, key)
-	n, err := c.intCmd(buf)
-	writeBuffers.Put(&buf)
-	return n, err
+	return c.intCmd(buf)
 }
 
 // BytesLLEN executes <https://redis.io/commands/llen>.
@@ -162,9 +134,7 @@ func (c *Client) LLEN(key string) (int64, error) {
 func (c *Client) BytesLLEN(key []byte) (int64, error) {
 	buf := writeBuffer("*2\r\n$4\r\nLLEN\r\n$")
 	buf = appendBytes(buf, key)
-	n, err := c.intCmd(buf)
-	writeBuffers.Put(&buf)
-	return n, err
+	return c.intCmd(buf)
 }
 
 // LINDEX executes <https://redis.io/commands/lindex>.
@@ -173,9 +143,7 @@ func (c *Client) BytesLLEN(key []byte) (int64, error) {
 func (c *Client) LINDEX(key string, index int64) (value []byte, err error) {
 	buf := writeBuffer("*3\r\n$6\r\nLINDEX\r\n$")
 	buf = appendStringInt(buf, key, index)
-	value, err = c.bulkCmd(buf)
-	writeBuffers.Put(&buf)
-	return value, err
+	return c.bulkCmd(buf)
 }
 
 // BytesLINDEX executes <https://redis.io/commands/lindex>.
@@ -184,9 +152,7 @@ func (c *Client) LINDEX(key string, index int64) (value []byte, err error) {
 func (c *Client) BytesLINDEX(key []byte, index int64) (value []byte, err error) {
 	buf := writeBuffer("*3\r\n$6\r\nLINDEX\r\n$")
 	buf = appendBytesInt(buf, key, index)
-	value, err = c.bulkCmd(buf)
-	writeBuffers.Put(&buf)
-	return value, err
+	return c.bulkCmd(buf)
 }
 
 // LRANGE executes <https://redis.io/commands/lrange>.
@@ -194,9 +160,7 @@ func (c *Client) BytesLINDEX(key []byte, index int64) (value []byte, err error) 
 func (c *Client) LRANGE(key string, start, stop int64) (values [][]byte, err error) {
 	buf := writeBuffer("*4\r\n$6\r\nLRANGE\r\n$")
 	buf = appendStringIntInt(buf, key, start, stop)
-	values, err = c.arrayCmd(buf)
-	writeBuffers.Put(&buf)
-	return values, err
+	return c.arrayCmd(buf)
 }
 
 // BytesLRANGE executes <https://redis.io/commands/lrange>.
@@ -204,9 +168,7 @@ func (c *Client) LRANGE(key string, start, stop int64) (values [][]byte, err err
 func (c *Client) BytesLRANGE(key []byte, start, stop int64) (values [][]byte, err error) {
 	buf := writeBuffer("*4\r\n$6\r\nLRANGE\r\n$")
 	buf = appendBytesIntInt(buf, key, start, stop)
-	values, err = c.arrayCmd(buf)
-	writeBuffers.Put(&buf)
-	return values, err
+	return c.arrayCmd(buf)
 }
 
 // LPOP executes <https://redis.io/commands/lpop>.
@@ -214,9 +176,7 @@ func (c *Client) BytesLRANGE(key []byte, start, stop int64) (values [][]byte, er
 func (c *Client) LPOP(key string) (value []byte, err error) {
 	buf := writeBuffer("*2\r\n$4\r\nLPOP\r\n$")
 	buf = appendString(buf, key)
-	value, err = c.bulkCmd(buf)
-	writeBuffers.Put(&buf)
-	return
+	return c.bulkCmd(buf)
 }
 
 // BytesLPOP executes <https://redis.io/commands/lpop>.
@@ -224,9 +184,7 @@ func (c *Client) LPOP(key string) (value []byte, err error) {
 func (c *Client) BytesLPOP(key []byte) (value []byte, err error) {
 	buf := writeBuffer("*2\r\n$4\r\nLPOP\r\n$")
 	buf = appendBytes(buf, key)
-	value, err = c.bulkCmd(buf)
-	writeBuffers.Put(&buf)
-	return
+	return c.bulkCmd(buf)
 }
 
 // RPOP executes <https://redis.io/commands/rpop>.
@@ -234,9 +192,7 @@ func (c *Client) BytesLPOP(key []byte) (value []byte, err error) {
 func (c *Client) RPOP(key string) (value []byte, err error) {
 	buf := writeBuffer("*2\r\n$4\r\nRPOP\r\n$")
 	buf = appendString(buf, key)
-	value, err = c.bulkCmd(buf)
-	writeBuffers.Put(&buf)
-	return
+	return c.bulkCmd(buf)
 }
 
 // BytesRPOP executes <https://redis.io/commands/rpop>.
@@ -244,108 +200,84 @@ func (c *Client) RPOP(key string) (value []byte, err error) {
 func (c *Client) BytesRPOP(key []byte) (value []byte, err error) {
 	buf := writeBuffer("*2\r\n$4\r\nRPOP\r\n$")
 	buf = appendBytes(buf, key)
-	value, err = c.bulkCmd(buf)
-	writeBuffers.Put(&buf)
-	return
+	return c.bulkCmd(buf)
 }
 
 // LTRIM executes <https://redis.io/commands/ltrim>.
 func (c *Client) LTRIM(key string, start, stop int64) error {
 	buf := writeBuffer("*4\r\n$5\r\nLTRIM\r\n$")
 	buf = appendStringIntInt(buf, key, start, stop)
-	err := c.okCmd(buf)
-	writeBuffers.Put(&buf)
-	return err
+	return c.okCmd(buf)
 }
 
 // BytesLTRIM executes <https://redis.io/commands/ltrim>.
 func (c *Client) BytesLTRIM(key []byte, start, stop int64) error {
 	buf := writeBuffer("*4\r\n$5\r\nLTRIM\r\n$")
 	buf = appendBytesIntInt(buf, key, start, stop)
-	err := c.okCmd(buf)
-	writeBuffers.Put(&buf)
-	return err
+	return c.okCmd(buf)
 }
 
 // LSET executes <https://redis.io/commands/lset>.
 func (c *Client) LSET(key string, index int64, value []byte) error {
 	buf := writeBuffer("*4\r\n$4\r\nLSET\r\n$")
 	buf = appendStringIntBytes(buf, key, index, value)
-	err := c.okCmd(buf)
-	writeBuffers.Put(&buf)
-	return err
+	return c.okCmd(buf)
 }
 
 // LSETString executes <https://redis.io/commands/lset>.
 func (c *Client) LSETString(key string, index int64, value string) error {
 	buf := writeBuffer("*4\r\n$4\r\nLSET\r\n$")
 	buf = appendStringIntString(buf, key, index, value)
-	err := c.okCmd(buf)
-	writeBuffers.Put(&buf)
-	return err
+	return c.okCmd(buf)
 }
 
 // BytesLSET executes <https://redis.io/commands/lset>.
 func (c *Client) BytesLSET(key []byte, index int64, value []byte) error {
 	buf := writeBuffer("*4\r\n$4\r\nLSET\r\n$")
 	buf = appendBytesIntBytes(buf, key, index, value)
-	err := c.okCmd(buf)
-	writeBuffers.Put(&buf)
-	return err
+	return c.okCmd(buf)
 }
 
 // LPUSH executes <https://redis.io/commands/lpush>.
 func (c *Client) LPUSH(key string, value []byte) (newLen int64, err error) {
 	buf := writeBuffer("*3\r\n$5\r\nLPUSH\r\n$")
 	buf = appendStringBytes(buf, key, value)
-	newLen, err = c.intCmd(buf)
-	writeBuffers.Put(&buf)
-	return
+	return c.intCmd(buf)
 }
 
 // BytesLPUSH executes <https://redis.io/commands/lpush>.
 func (c *Client) BytesLPUSH(key, value []byte) (newLen int64, err error) {
 	buf := writeBuffer("*3\r\n$5\r\nLPUSH\r\n$")
 	buf = appendBytesBytes(buf, key, value)
-	newLen, err = c.intCmd(buf)
-	writeBuffers.Put(&buf)
-	return
+	return c.intCmd(buf)
 }
 
 // LPUSHString executes <https://redis.io/commands/lpush>.
 func (c *Client) LPUSHString(key, value string) (newLen int64, err error) {
 	buf := writeBuffer("*3\r\n$5\r\nLPUSH\r\n$")
 	buf = appendStringString(buf, key, value)
-	newLen, err = c.intCmd(buf)
-	writeBuffers.Put(&buf)
-	return
+	return c.intCmd(buf)
 }
 
 // RPUSH executes <https://redis.io/commands/rpush>.
 func (c *Client) RPUSH(key string, value []byte) (newLen int64, err error) {
 	buf := writeBuffer("*3\r\n$5\r\nRPUSH\r\n$")
 	buf = appendStringBytes(buf, key, value)
-	newLen, err = c.intCmd(buf)
-	writeBuffers.Put(&buf)
-	return
+	return c.intCmd(buf)
 }
 
 // BytesRPUSH executes <https://redis.io/commands/rpush>.
 func (c *Client) BytesRPUSH(key, value []byte) (newLen int64, err error) {
 	buf := writeBuffer("*3\r\n$5\r\nRPUSH\r\n$")
 	buf = appendBytesBytes(buf, key, value)
-	newLen, err = c.intCmd(buf)
-	writeBuffers.Put(&buf)
-	return
+	return c.intCmd(buf)
 }
 
 // RPUSHString executes <https://redis.io/commands/rpush>.
 func (c *Client) RPUSHString(key, value string) (newLen int64, err error) {
 	buf := writeBuffer("*3\r\n$5\r\nRPUSH\r\n$")
 	buf = appendStringString(buf, key, value)
-	newLen, err = c.intCmd(buf)
-	writeBuffers.Put(&buf)
-	return
+	return c.intCmd(buf)
 }
 
 // HGET executes <https://redis.io/commands/hget>.
@@ -353,9 +285,7 @@ func (c *Client) RPUSHString(key, value string) (newLen int64, err error) {
 func (c *Client) HGET(key, field string) (value []byte, err error) {
 	buf := writeBuffer("*3\r\n$4\r\nHGET\r\n$")
 	buf = appendStringString(buf, key, field)
-	value, err = c.bulkCmd(buf)
-	writeBuffers.Put(&buf)
-	return
+	return c.bulkCmd(buf)
 }
 
 // BytesHGET executes <https://redis.io/commands/hget>.
@@ -363,9 +293,7 @@ func (c *Client) HGET(key, field string) (value []byte, err error) {
 func (c *Client) BytesHGET(key, field []byte) (value []byte, err error) {
 	buf := writeBuffer("*3\r\n$4\r\nHGET\r\n$")
 	buf = appendBytesBytes(buf, key, field)
-	value, err = c.bulkCmd(buf)
-	writeBuffers.Put(&buf)
-	return
+	return c.bulkCmd(buf)
 }
 
 // HSET executes <https://redis.io/commands/hset>.
@@ -373,7 +301,6 @@ func (c *Client) HSET(key, field string, value []byte) (newField bool, err error
 	buf := writeBuffer("*4\r\n$4\r\nHSET\r\n$")
 	buf = appendStringStringBytes(buf, key, field, value)
 	created, err := c.intCmd(buf)
-	writeBuffers.Put(&buf)
 	return created != 0, err
 }
 
@@ -382,7 +309,6 @@ func (c *Client) BytesHSET(key, field, value []byte) (newField bool, err error) 
 	buf := writeBuffer("*4\r\n$4\r\nHSET\r\n$")
 	buf = appendBytesBytesBytes(buf, key, field, value)
 	created, err := c.intCmd(buf)
-	writeBuffers.Put(&buf)
 	return created != 0, err
 }
 
@@ -391,7 +317,6 @@ func (c *Client) HSETString(key, field, value string) (updated bool, err error) 
 	buf := writeBuffer("*4\r\n$4\r\nHSET\r\n$")
 	buf = appendStringStringString(buf, key, field, value)
 	replaced, err := c.intCmd(buf)
-	writeBuffers.Put(&buf)
 	return replaced != 0, err
 }
 
@@ -400,7 +325,6 @@ func (c *Client) HDEL(key, field string) (bool, error) {
 	buf := writeBuffer("*3\r\n$4\r\nHDEL\r\n$")
 	buf = appendStringString(buf, key, field)
 	removed, err := c.intCmd(buf)
-	writeBuffers.Put(&buf)
 	return removed != 0, err
 }
 
@@ -409,7 +333,6 @@ func (c *Client) BytesHDEL(key, field []byte) (bool, error) {
 	buf := writeBuffer("*3\r\n$4\r\nHDEL\r\n$")
 	buf = appendBytesBytes(buf, key, field)
 	removed, err := c.intCmd(buf)
-	writeBuffers.Put(&buf)
 	return removed != 0, err
 }
 
@@ -712,5 +635,8 @@ func (c *Client) send(buf []byte, callback parser) error {
 
 	// release lock
 	c.writeSem <- conn
+
+	writeBuffers.Put(&buf)
+
 	return nil
 }
