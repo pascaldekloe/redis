@@ -242,10 +242,10 @@ type parser interface {
 	parse(*bufio.Reader) bool
 }
 
-var okParsers = sync.Pool{New: func() interface{} { return make(okParser, 1) }}
-var intParsers = sync.Pool{New: func() interface{} { return make(intParser, 1) }}
-var bulkParsers = sync.Pool{New: func() interface{} { return make(bulkParser, 1) }}
-var arrayParsers = sync.Pool{New: func() interface{} { return make(arrayParser, 1) }}
+var okParsers = sync.Pool{New: func() interface{} { return make(okParser) }}
+var intParsers = sync.Pool{New: func() interface{} { return make(intParser) }}
+var bulkParsers = sync.Pool{New: func() interface{} { return make(bulkParser) }}
+var arrayParsers = sync.Pool{New: func() interface{} { return make(arrayParser) }}
 
 type okParser chan error
 type intParser chan intResponse
