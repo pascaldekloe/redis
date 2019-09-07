@@ -178,14 +178,6 @@ func TestRedisError(t *testing.T) {
 	}
 }
 
-func TestFirstByteError(t *testing.T) {
-	got := firstByteError('?', []byte("abc\r\n")).Error()
-	want := `redis: protocol violation; unexpected first byte 0x3f in line "?abc\r\n"`
-	if got != want {
-		t.Errorf("got %q, want %q", got, want)
-	}
-}
-
 func BenchmarkSimpleString(b *testing.B) {
 	key := randomKey("bench")
 	defer func() {

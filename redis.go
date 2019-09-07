@@ -35,6 +35,10 @@ var errNull = errors.New("redis: null")
 // ServerError is a message send by the server.
 type ServerError string
 
+func parseError(line []byte) error {
+	return ServerError(line[1 : len(line)-2])
+}
+
 // Error honors the error interface.
 func (e ServerError) Error() string {
 	return fmt.Sprintf("redis: server error %q", string(e))
@@ -261,22 +265,21 @@ type bulkParser chan bulkResponse
 type arrayParser chan arrayResponse
 
 func (p okParser) parse(r *bufio.Reader) bool {
-	first, line, err := readCRLF(r)
-	switch {
+	switch line, err := readCRLF(r); {
 	case err != nil:
 		p <- err
 		return false
-	case first == '+' && len(line) == 2 && line[0] == 'O' && line[1] == 'K':
+	case line[0] == '+' && line[1] == 'O' && line[2] == 'K':
 		p <- nil
 		return true
-	case first == '$' && len(line) == 2 && line[0] == '-' && line[1] == '1':
+	case line[0] == '$' && line[1] == '-' && line[2] == '1':
 		p <- errNull
 		return true
-	case first == '-':
-		p <- ServerError(line)
+	case line[0] == '-':
+		p <- parseError(line)
 		return true
 	default:
-		p <- fmt.Errorf("%w; unexpected line %.40q", errProtocol, append([]byte{first}, line...))
+		p <- fmt.Errorf("%w; want OK simple string, received %.40q", errProtocol, line)
 		return false
 	}
 }
@@ -287,19 +290,18 @@ type intResponse struct {
 }
 
 func (p intParser) parse(r *bufio.Reader) bool {
-	first, line, err := readCRLF(r)
-	switch {
+	switch line, err := readCRLF(r); {
 	case err != nil:
 		p <- intResponse{Err: err}
 		return false
-	case first == ':':
-		p <- intResponse{Int: ParseInt(line)}
+	case line[0] == ':':
+		p <- intResponse{Int: ParseInt(line[1 : len(line)-2])}
 		return true
-	case first == '-':
-		p <- intResponse{Err: ServerError(line)}
+	case line[0] == '-':
+		p <- intResponse{Err: parseError(line)}
 		return true
 	default:
-		p <- intResponse{Err: firstByteError(first, line)}
+		p <- intResponse{Err: fmt.Errorf("%w; want an integer, received %.40q", errProtocol, line)}
 		return false
 	}
 }
@@ -310,20 +312,20 @@ type bulkResponse struct {
 }
 
 func (p bulkParser) parse(r *bufio.Reader) bool {
-	first, line, err := readCRLF(r)
+	line, err := readCRLF(r)
 	switch {
 	case err != nil:
 		p <- bulkResponse{Err: err}
 		return false
-	case first == '$':
+	case line[0] == '$':
 		bytes, err := readBulk(r, line)
 		p <- bulkResponse{Bytes: bytes, Err: err}
 		return err == nil
-	case first == '-':
-		p <- bulkResponse{Err: ServerError(line)}
+	case line[0] == '-':
+		p <- bulkResponse{Err: parseError(line)}
 		return true
 	default:
-		p <- bulkResponse{Err: firstByteError(first, line)}
+		p <- bulkResponse{Err: fmt.Errorf("%w; want a bulk string, received %.40q", errProtocol, line)}
 		return false
 	}
 }
@@ -334,42 +336,38 @@ type arrayResponse struct {
 }
 
 func (p arrayParser) parse(r *bufio.Reader) bool {
-	first, line, err := readCRLF(r)
-	switch {
+	var array [][]byte
+	switch line, err := readCRLF(r); {
 	case err != nil:
 		p <- arrayResponse{Err: err}
 		return false
-	case first == '*':
-		break
-	case first == '-':
-		p <- arrayResponse{Err: ServerError(line)}
+	case line[0] == '*':
+		// negative means null–zero must be non-nil
+		if size := ParseInt(line[1 : len(line)-2]); size >= 0 {
+			array = make([][]byte, size)
+		}
+	case line[0] == '-':
+		p <- arrayResponse{Err: parseError(line)}
 		return true
 	default:
-		p <- arrayResponse{Err: firstByteError(first, line)}
+		p <- arrayResponse{Err: fmt.Errorf("%w; want an array, received %.40q", errProtocol, line)}
 		return false
-	}
-
-	var array [][]byte
-	// negative means null–zero must be non-nil
-	if size := ParseInt(line); size >= 0 {
-		array = make([][]byte, size)
 	}
 
 	// parse elements
 	for i := range array {
-		first, line, err := readCRLF(r)
-		switch {
+		switch line, err := readCRLF(r); {
 		case err != nil:
 			p <- arrayResponse{Err: err}
 			return false
-		case first == '$':
+		case line[0] == '$':
 			array[i], err = readBulk(r, line)
 			if err != nil {
 				p <- arrayResponse{Err: err}
 				return false
 			}
 		default:
-			p <- arrayResponse{Err: firstByteError(first, line)}
+			p <- arrayResponse{Err: fmt.Errorf("%w; element %d received %q", errProtocol, i, line)}
 			return false
 		}
 	}
@@ -378,30 +376,25 @@ func (p arrayParser) parse(r *bufio.Reader) bool {
 	return true
 }
 
-func firstByteError(first byte, line []byte) error {
-	return fmt.Errorf("%w; unexpected first byte %#x in line %.40q", errProtocol, first, append([]byte{first}, line...))
-}
-
-// WARNING: line only valid until the next read on r.
-func readCRLF(r *bufio.Reader) (first byte, line []byte, err error) {
+// ReadCRLF returns the line, with at least 3 bytes in size.
+// WARNING: line stays only valid until the next read on r.
+func readCRLF(r *bufio.Reader) (line []byte, err error) {
 	line, err = r.ReadSlice('\n')
 	if err != nil {
 		if err == bufio.ErrBufferFull {
-			err = fmt.Errorf("%w; CRLF line exceeds %d bytes: %.40q…", errProtocol, r.Size(), line)
+			err = fmt.Errorf("%w; CRLF exceeds %d bytes: %.40q…", errProtocol, r.Size(), line)
 		}
-		return 0, nil, err
+		return nil, err
 	}
 
-	end := len(line) - 2
-	if end <= 0 || line[end] != '\r' {
-		return 0, nil, fmt.Errorf("%w; CRLF empty or preceded by LF %q", errProtocol, line)
+	if len(line) < 3 {
+		return nil, fmt.Errorf("%w; empty CRLF: %q", errProtocol, line)
 	}
-	return line[0], line[1:end], nil
+	return line, nil
 }
 
-// ReadBulk continues with line after a '$' was read.
 func readBulk(r *bufio.Reader, line []byte) ([]byte, error) {
-	size := ParseInt(line)
+	size := ParseInt(line[1 : len(line)-2])
 	if size < 0 {
 		return nil, nil
 	}
