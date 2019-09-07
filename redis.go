@@ -36,7 +36,10 @@ var errNull = errors.New("redis: null")
 type ServerError string
 
 func parseError(line []byte) error {
-	return ServerError(line[1 : len(line)-2])
+	if len(line) > 2 && line[0] == '-' && line[len(line)-2] == '\r' {
+		line = line[1 : len(line)-2]
+	}
+	return ServerError(line)
 }
 
 // Error honors the error interface.
@@ -269,13 +272,13 @@ func (p okDecoder) decode(r *bufio.Reader) bool {
 	case err != nil:
 		p <- err
 		return false
-	case line[0] == '+' && line[1] == 'O' && line[2] == 'K':
+	case len(line) > 2 && line[0] == '+' && line[1] == 'O' && line[2] == 'K':
 		p <- nil
 		return true
-	case line[0] == '$' && line[1] == '-' && line[2] == '1':
+	case len(line) > 2 && line[0] == '$' && line[1] == '-' && line[2] == '1':
 		p <- errNull
 		return true
-	case line[0] == '-':
+	case len(line) > 2 && line[0] == '-':
 		p <- parseError(line)
 		return true
 	default:
@@ -294,10 +297,10 @@ func (p intDecoder) decode(r *bufio.Reader) bool {
 	case err != nil:
 		p <- intResponse{Err: err}
 		return false
-	case line[0] == ':':
+	case len(line) > 2 && line[0] == ':':
 		p <- intResponse{Int: ParseInt(line[1 : len(line)-2])}
 		return true
-	case line[0] == '-':
+	case len(line) > 2 && line[0] == '-':
 		p <- intResponse{Err: parseError(line)}
 		return true
 	default:
@@ -317,11 +320,11 @@ func (p bulkDecoder) decode(r *bufio.Reader) bool {
 	case err != nil:
 		p <- bulkResponse{Err: err}
 		return false
-	case line[0] == '$':
+	case len(line) > 2 && line[0] == '$':
 		bytes, err := readBulk(r, line)
 		p <- bulkResponse{Bytes: bytes, Err: err}
 		return err == nil
-	case line[0] == '-':
+	case len(line) > 2 && line[0] == '-':
 		p <- bulkResponse{Err: parseError(line)}
 		return true
 	default:
@@ -341,12 +344,12 @@ func (p arrayDecoder) decode(r *bufio.Reader) bool {
 	case err != nil:
 		p <- arrayResponse{Err: err}
 		return false
-	case line[0] == '*':
+	case len(line) > 2 && line[0] == '*':
 		// negative means null–zero must be non-nil
 		if size := ParseInt(line[1 : len(line)-2]); size >= 0 {
 			array = make([][]byte, size)
 		}
-	case line[0] == '-':
+	case len(line) > 2 && line[0] == '-':
 		p <- arrayResponse{Err: parseError(line)}
 		return true
 	default:
@@ -360,7 +363,7 @@ func (p arrayDecoder) decode(r *bufio.Reader) bool {
 		case err != nil:
 			p <- arrayResponse{Err: err}
 			return false
-		case line[0] == '$':
+		case len(line) > 2 && line[0] == '$':
 			array[i], err = readBulk(r, line)
 			if err != nil {
 				p <- arrayResponse{Err: err}
@@ -376,7 +379,6 @@ func (p arrayDecoder) decode(r *bufio.Reader) bool {
 	return true
 }
 
-// ReadCRLF returns the line, with at least 3 bytes in size.
 // WARNING: line stays only valid until the next read on r.
 func readCRLF(r *bufio.Reader) (line []byte, err error) {
 	line, err = r.ReadSlice('\n')
@@ -386,14 +388,13 @@ func readCRLF(r *bufio.Reader) (line []byte, err error) {
 		}
 		return nil, err
 	}
-
-	if len(line) < 3 {
-		return nil, fmt.Errorf("%w; empty CRLF: %q", errProtocol, line)
-	}
 	return line, nil
 }
 
 func readBulk(r *bufio.Reader, line []byte) ([]byte, error) {
+	if len(line) < 3 {
+		return nil, fmt.Errorf("%w; received empty line: %q", errProtocol, line)
+	}
 	size := ParseInt(line[1 : len(line)-2])
 	if size < 0 {
 		return nil, nil
