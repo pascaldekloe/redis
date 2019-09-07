@@ -11,25 +11,46 @@ This is free and unencumbered software released into the
 
 ## Performance
 
-Unix domain sockets provide a significant boost, when compared to TCP.
 The following results were measured on a E5-1650 v2 (from the year 2013).
 
+#### TCP
+
 ```
-name                             old time/op  new time/op  delta
-SimpleString/sequential-12       63.6µs ± 0%  34.4µs ± 1%  -46.03%  (p=0.000 n=16+16)
-SimpleString/parallel-12         20.3µs ± 1%   6.1µs ± 3%  -70.03%  (p=0.000 n=15+16)
-Integer/sequential-12            62.0µs ± 0%  33.2µs ± 0%  -46.51%  (p=0.000 n=15+16)
-Integer/parallel-12              20.0µs ± 2%   5.9µs ± 2%  -70.42%  (p=0.000 n=16+14)
-BulkString/1B/sequential-12      62.8µs ± 0%  33.7µs ± 0%  -46.34%  (p=0.000 n=16+16)
-BulkString/1B/parallel-12        20.2µs ± 1%   6.0µs ± 1%  -70.49%  (p=0.000 n=14+15)
-BulkString/144B/sequential-12    63.6µs ± 0%  34.6µs ± 0%  -45.57%  (p=0.000 n=16+14)
-BulkString/144B/parallel-12      20.3µs ± 2%   6.1µs ± 2%  -70.01%  (p=0.000 n=16+16)
-BulkString/20736B/sequential-12  80.0µs ± 1%  80.8µs ± 0%   +1.04%  (p=0.000 n=15+15)
-BulkString/20736B/parallel-12    33.6µs ± 4%  54.5µs ± 0%  +62.21%  (p=0.000 n=14+13)
-Array/1×8B/sequential-12         65.8µs ± 0%  36.1µs ± 0%  -45.10%  (p=0.000 n=13+14)
-Array/1×8B/parallel-12           20.6µs ± 1%   6.5µs ± 4%  -68.63%  (p=0.000 n=16+16)
-Array/12×8B/sequential-12        68.4µs ± 0%  38.8µs ± 0%  -43.31%  (p=0.000 n=13+15)
-Array/12×8B/parallel-12          20.6µs ± 0%   7.4µs ± 5%  -63.98%  (p=0.000 n=13+15)
-Array/144×8B/sequential-12       90.9µs ± 0%  60.9µs ± 0%  -32.99%  (p=0.000 n=16+16)
-Array/144×8B/parallel-12         26.2µs ± 3%  23.7µs ± 2%   -9.27%  (p=0.000 n=14+16)
+BenchmarkSimpleString/sequential-12         	   20076	     59504 ns/op
+BenchmarkSimpleString/parallel-12           	  121870	      9769 ns/op
+BenchmarkInteger/sequential-12              	   20616	     58077 ns/op
+BenchmarkInteger/parallel-12                	  123735	      9620 ns/op
+BenchmarkBulkString/1B/sequential-12        	   20432	     58637 ns/op
+BenchmarkBulkString/1B/parallel-12          	  123364	      9677 ns/op
+BenchmarkBulkString/144B/sequential-12      	   20186	     59357 ns/op
+BenchmarkBulkString/144B/parallel-12        	  120703	      9843 ns/op
+BenchmarkBulkString/20736B/sequential-12    	   15932	     75499 ns/op
+BenchmarkBulkString/20736B/parallel-12      	   36267	     32821 ns/op
+BenchmarkArray/1×8B/sequential-12           	   19417	     61326 ns/op
+BenchmarkArray/1×8B/parallel-12             	  116478	     10162 ns/op
+BenchmarkArray/12×8B/sequential-12          	   18674	     64727 ns/op
+BenchmarkArray/12×8B/parallel-12            	  109290	     10917 ns/op
+BenchmarkArray/144×8B/sequential-12         	   13855	     86633 ns/op
+BenchmarkArray/144×8B/parallel-12           	   48794	     25336 ns/op
+```
+
+#### Unix Domain Socket
+
+```
+BenchmarkSimpleString/sequential-12         	   36267	     32912 ns/op
+BenchmarkSimpleString/parallel-12           	  204867	      5699 ns/op
+BenchmarkInteger/sequential-12              	   37681	     31813 ns/op
+BenchmarkInteger/parallel-12                	  210139	      5511 ns/op
+BenchmarkBulkString/1B/sequential-12        	   36902	     32574 ns/op
+BenchmarkBulkString/1B/parallel-12          	  212095	      5561 ns/op
+BenchmarkBulkString/144B/sequential-12      	   35874	     33455 ns/op
+BenchmarkBulkString/144B/parallel-12        	  208605	      5678 ns/op
+BenchmarkBulkString/20736B/sequential-12    	   15589	     77267 ns/op
+BenchmarkBulkString/20736B/parallel-12      	   22905	     52213 ns/op
+BenchmarkArray/1×8B/sequential-12           	   34530	     34630 ns/op
+BenchmarkArray/1×8B/parallel-12             	  190671	      6102 ns/op
+BenchmarkArray/12×8B/sequential-12          	   32229	     37111 ns/op
+BenchmarkArray/12×8B/parallel-12            	  164794	      7125 ns/op
+BenchmarkArray/144×8B/sequential-12         	   20258	     59222 ns/op
+BenchmarkArray/144×8B/parallel-12           	   52867	     22336 ns/op
 ```
