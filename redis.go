@@ -165,8 +165,7 @@ func (c *Client) manage() {
 		if isUnixAddr(c.Addr) {
 			network = "unix"
 		}
-		dialer := net.Dialer{Timeout: c.connectTimeout}
-		conn, err := dialer.Dial(network, c.Addr)
+		conn, err := net.DialTimeout(network, c.Addr, c.connectTimeout)
 		if err != nil {
 			if notify == nil {
 				notify = make(chan error)
@@ -178,6 +177,11 @@ func (c *Client) manage() {
 		if notify != nil {
 			close(notify)
 			notify = nil
+		}
+
+		if tcp, ok := conn.(*net.TCPConn); ok {
+			tcp.SetNoDelay(false)
+			tcp.SetLinger(0)
 		}
 
 		// Release the command submission instance.
