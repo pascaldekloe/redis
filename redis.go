@@ -213,6 +213,8 @@ func (c *Client) manage() {
 		// The command submission is blocked now.
 		// Both writeSem and writeErr are empty.
 
+		conn.Close()
+
 		// flush queue with errConnLost
 		for len(c.queue) != 0 {
 			r.Reset(connLostReader{})
