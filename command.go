@@ -19,6 +19,52 @@ func writeBuffer(prefix string) []byte {
 	return append((*p)[:0], prefix...)
 }
 
+// SELECT executes <https://redis.io/commands/select>.
+func (c *Client) SELECT(db int64) error {
+	buf := writeBuffer("*2\r\n$6\r\nSELECT\r\n$")
+	buf = appendDecimal(buf, db)
+	buf = append(buf, '\r', '\n')
+	return c.okCmd(buf)
+}
+
+// MOVE executes <https://redis.io/commands/move>.
+func (c *Client) MOVE(key string, db int64) (bool, error) {
+	buf := writeBuffer("*3\r\n$4\r\nMOVE\r\n$")
+	buf = appendStringInt(buf, key, db)
+	n, err := c.intCmd(buf)
+	return n != 0, err
+}
+
+// BytesMOVE executes <https://redis.io/commands/move>.
+func (c *Client) BytesMOVE(key []byte, db int64) (bool, error) {
+	buf := writeBuffer("*3\r\n$4\r\nMOVE\r\n$")
+	buf = appendBytesInt(buf, key, db)
+	n, err := c.intCmd(buf)
+	return n != 0, err
+}
+
+// FLUSHDB executes <https://redis.io/commands/flushdb>.
+func (c *Client) FLUSHDB(async bool) error {
+	var buf []byte
+	if async {
+		buf = writeBuffer("*2\r\n$7\r\nFLUSHDB\r\n$5\r\nASYNC\r\n")
+	} else {
+		buf = writeBuffer("*1\r\n$7\r\nFLUSHDB\r\n")
+	}
+	return c.okCmd(buf)
+}
+
+// FLUSHALL executes <https://redis.io/commands/flushall>.
+func (c *Client) FLUSHALL(async bool) error {
+	var buf []byte
+	if async {
+		buf = writeBuffer("*2\r\n$8\r\nFLUSHALL\r\n$5\r\nASYNC\r\n")
+	} else {
+		buf = writeBuffer("*1\r\n$8\r\nFLUSHALL\r\n")
+	}
+	return c.okCmd(buf)
+}
+
 // GET executes <https://redis.io/commands/get>.
 // The return is nil if key does not exist.
 func (c *Client) GET(key string) (value []byte, err error) {

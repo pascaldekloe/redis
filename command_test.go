@@ -6,6 +6,47 @@ import (
 	"testing"
 )
 
+func TestDBSwitch(t *testing.T) {
+	key, value := randomKey("test-key"), "✓"
+
+	if err := testClient.SELECT(13); err != nil {
+		t.Fatal("SELECT 13 error:", err)
+	}
+	if err := testClient.SETString(key, value); err != nil {
+		t.Fatalf("SET %q %q in DB 13 error: %s", key, value, err)
+	}
+	if ok, err := testClient.MOVE(key, 14); err != nil {
+		t.Errorf("MOVE %q 14 error: %s", key, err)
+	} else if !ok {
+		t.Errorf("MOVE %q 14 got false", key)
+	}
+	if bytes, err := testClient.GET(key); err != nil {
+		t.Errorf("GET %q in DB 13 error: %s", key, err)
+	} else if bytes != nil {
+		t.Errorf("GET %q in DB 13 got %q, want nil", key, bytes)
+	}
+	if err := testClient.FLUSHDB(true); err != nil {
+		t.Error("FLUSHDB ASYNC error:", err)
+	}
+
+	if err := testClient.SELECT(14); err != nil {
+		t.Fatal("SELECT 14 error:", err)
+	}
+	if bytes, err := testClient.GET(key); err != nil {
+		t.Errorf("GET %q in DB 14 error: %s", key, err)
+	} else if string(bytes) != value {
+		t.Errorf("GET %q in DB 14 got %q, want %q", key, bytes, value)
+	}
+	if err := testClient.FLUSHDB(false); err != nil {
+		t.Fatal("FLUSHDB error:", err)
+	}
+	if ok, err := testClient.BytesMOVE([]byte(key), 13); err != nil {
+		t.Errorf("MOVE %q 13 after FLUSHDB error: %s", key, err)
+	} else if ok {
+		t.Errorf("MOVE %q 13 after FLUSHDB got true", key)
+	}
+}
+
 func TestKeyCRUD(t *testing.T) {
 	t.Parallel()
 	key := randomKey("test-key")
