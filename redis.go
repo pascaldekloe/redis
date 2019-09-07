@@ -118,7 +118,7 @@ type Client struct {
 	writeErr chan struct{}
 
 	// Pending commands: request send, awaiting response.
-	queue chan parser
+	queue chan decoder
 
 	// Receives errors when the connection is unavailable.
 	offline chan error
@@ -154,7 +154,7 @@ func NewClient(addr string, timeout, connectTimeout time.Duration) *Client {
 
 		writeSem: make(chan net.Conn, 1), // one shared instance
 		writeErr: make(chan struct{}, 1), // may not block
-		queue:    make(chan parser, queueSize),
+		queue:    make(chan decoder, queueSize),
 		offline:  make(chan error),
 	}
 	go c.manage()
@@ -194,11 +194,11 @@ func (c *Client) manage() {
 		r := bufio.NewReaderSize(conn, conservativeMSS)
 		for {
 			select {
-			case response := <-c.queue:
+			case decoder := <-c.queue:
 				if c.timeout != 0 {
 					conn.SetReadDeadline(time.Now().Add(c.timeout))
 				}
-				if response.parse(r) {
+				if decoder.decode(r) {
 					continue // command done
 				}
 				// fatal read error
@@ -222,7 +222,7 @@ func (c *Client) manage() {
 		// flush queue with errConnLost
 		for len(c.queue) != 0 {
 			r.Reset(connLostReader{})
-			(<-c.queue).parse(r)
+			(<-c.queue).decode(r)
 		}
 	}
 }
@@ -250,21 +250,21 @@ func (r connLostReader) Read([]byte) (int, error) {
 	return 0, errConnLost
 }
 
-type parser interface {
-	parse(*bufio.Reader) bool
+type decoder interface {
+	decode(*bufio.Reader) bool
 }
 
-var okParsers = sync.Pool{New: func() interface{} { return make(okParser) }}
-var intParsers = sync.Pool{New: func() interface{} { return make(intParser) }}
-var bulkParsers = sync.Pool{New: func() interface{} { return make(bulkParser) }}
-var arrayParsers = sync.Pool{New: func() interface{} { return make(arrayParser) }}
+var okDecoders = sync.Pool{New: func() interface{} { return make(okDecoder) }}
+var intDecoders = sync.Pool{New: func() interface{} { return make(intDecoder) }}
+var bulkDecoders = sync.Pool{New: func() interface{} { return make(bulkDecoder) }}
+var arrayDecoders = sync.Pool{New: func() interface{} { return make(arrayDecoder) }}
 
-type okParser chan error
-type intParser chan intResponse
-type bulkParser chan bulkResponse
-type arrayParser chan arrayResponse
+type okDecoder chan error
+type intDecoder chan intResponse
+type bulkDecoder chan bulkResponse
+type arrayDecoder chan arrayResponse
 
-func (p okParser) parse(r *bufio.Reader) bool {
+func (p okDecoder) decode(r *bufio.Reader) bool {
 	switch line, err := readCRLF(r); {
 	case err != nil:
 		p <- err
@@ -289,7 +289,7 @@ type intResponse struct {
 	Err error
 }
 
-func (p intParser) parse(r *bufio.Reader) bool {
+func (p intDecoder) decode(r *bufio.Reader) bool {
 	switch line, err := readCRLF(r); {
 	case err != nil:
 		p <- intResponse{Err: err}
@@ -311,7 +311,7 @@ type bulkResponse struct {
 	Err   error
 }
 
-func (p bulkParser) parse(r *bufio.Reader) bool {
+func (p bulkDecoder) decode(r *bufio.Reader) bool {
 	line, err := readCRLF(r)
 	switch {
 	case err != nil:
@@ -335,7 +335,7 @@ type arrayResponse struct {
 	Err   error
 }
 
-func (p arrayParser) parse(r *bufio.Reader) bool {
+func (p arrayDecoder) decode(r *bufio.Reader) bool {
 	var array [][]byte
 	switch line, err := readCRLF(r); {
 	case err != nil:

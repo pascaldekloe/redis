@@ -608,54 +608,54 @@ func appendDecimal(buf []byte, v int64) []byte {
 }
 
 func (c *Client) okCmd(buf []byte) error {
-	parser := okParsers.Get().(okParser)
-	if err := c.send(buf, parser); err != nil {
+	decoder := okDecoders.Get().(okDecoder)
+	if err := c.send(buf, decoder); err != nil {
 		return err
 	}
 
 	// await response
-	err := <-parser
-	okParsers.Put(parser)
+	err := <-decoder
+	okDecoders.Put(decoder)
 	return err
 }
 
 func (c *Client) intCmd(buf []byte) (int64, error) {
-	parser := intParsers.Get().(intParser)
-	if err := c.send(buf, parser); err != nil {
+	decoder := intDecoders.Get().(intDecoder)
+	if err := c.send(buf, decoder); err != nil {
 		return 0, err
 	}
 
 	// await response
-	resp := <-parser
-	intParsers.Put(parser)
+	resp := <-decoder
+	intDecoders.Put(decoder)
 	return resp.Int, resp.Err
 }
 
 func (c *Client) bulkCmd(buf []byte) ([]byte, error) {
-	parser := bulkParsers.Get().(bulkParser)
-	if err := c.send(buf, parser); err != nil {
+	decoder := bulkDecoders.Get().(bulkDecoder)
+	if err := c.send(buf, decoder); err != nil {
 		return nil, err
 	}
 
 	// await response
-	resp := <-parser
-	bulkParsers.Put(parser)
+	resp := <-decoder
+	bulkDecoders.Put(decoder)
 	return resp.Bytes, resp.Err
 }
 
 func (c *Client) arrayCmd(buf []byte) ([][]byte, error) {
-	parser := arrayParsers.Get().(arrayParser)
-	if err := c.send(buf, parser); err != nil {
+	decoder := arrayDecoders.Get().(arrayDecoder)
+	if err := c.send(buf, decoder); err != nil {
 		return nil, err
 	}
 
 	// await response
-	resp := <-parser
-	arrayParsers.Put(parser)
+	resp := <-decoder
+	arrayDecoders.Put(decoder)
 	return resp.Array, resp.Err
 }
 
-func (c *Client) send(buf []byte, callback parser) error {
+func (c *Client) send(buf []byte, callback decoder) error {
 	var conn net.Conn
 	select {
 	case conn = <-c.writeSem:
