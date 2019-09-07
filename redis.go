@@ -148,8 +148,8 @@ func NewClient(addr string, timeout, connectTimeout time.Duration) *Client {
 		timeout:        timeout,
 		connectTimeout: connectTimeout,
 
-		writeSem: make(chan net.Conn, 1),
-		writeErr: make(chan struct{}, 1),
+		writeSem: make(chan net.Conn, 1), // one shared instance
+		writeErr: make(chan struct{}, 1), // may not block
 		queue:    make(chan parser, queueSize),
 		offline:  make(chan error),
 	}
@@ -180,7 +180,7 @@ func (c *Client) manage() {
 			notify = nil
 		}
 
-		// release command submission
+		// Release the command submission instance.
 		c.writeSem <- conn
 
 		r := bufio.NewReaderSize(conn, conservativeMSS)
@@ -202,12 +202,14 @@ func (c *Client) manage() {
 					break // error already detected
 				}
 			case <-c.writeErr:
-				break
+				break // fatal write error
 			}
 			break
 		}
-		// command submission blocked
+		// The command submission is blocked now.
+		// Both writeSem and writeErr are empty.
 
+		// flush queue with errConnLost
 		for len(c.queue) != 0 {
 			r.Reset(connLostReader{})
 			(<-c.queue).parse(r)

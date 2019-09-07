@@ -551,7 +551,8 @@ func appendDecimal(buf []byte, v int64) []byte {
 
 	intOffset := len(buf)
 	buf = strconv.AppendInt(buf, v, 10)
-	if size := len(buf) - intOffset; sizeOneDecimal {
+	size := len(buf) - intOffset
+	if sizeOneDecimal {
 		buf[sizeOffset] = byte(size + '0')
 	} else {
 		buf[sizeOffset] = byte(size/10 + '0')
@@ -623,10 +624,7 @@ func (c *Client) send(buf []byte, callback parser) error {
 	}
 	if _, err := conn.Write(buf); err != nil {
 		// The write semaphore is not released.
-		select {
-		case c.writeErr <- struct{}{}:
-		case <-c.offline:
-		}
+		c.writeErr <- struct{}{} // does not block
 		return err
 	}
 
