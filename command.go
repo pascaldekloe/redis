@@ -1,686 +1,363 @@
 package redis
 
-import (
-	"net"
-	"strconv"
-	"sync"
-	"time"
-)
-
-var writeBuffers = sync.Pool{
-	New: func() interface{} {
-		buf := make([]byte, 256)
-		return &buf
-	},
-}
-
-func writeBuffer(prefix string) []byte {
-	p := writeBuffers.Get().(*[]byte)
-	return append((*p)[:0], prefix...)
-}
-
 // SELECT executes <https://redis.io/commands/select>.
 func (c *Client) SELECT(db int64) error {
-	buf := writeBuffer("*2\r\n$6\r\nSELECT\r\n$")
-	buf = appendDecimal(buf, db)
-	buf = append(buf, '\r', '\n')
-	return c.okCmd(buf)
+	codec := newCodec("*2\r\n$6\r\nSELECT\r\n$")
+	codec.addDecimal(db)
+	return c.commandOK(codec)
 }
 
 // MOVE executes <https://redis.io/commands/move>.
 func (c *Client) MOVE(key string, db int64) (bool, error) {
-	buf := writeBuffer("*3\r\n$4\r\nMOVE\r\n$")
-	buf = appendStringInt(buf, key, db)
-	n, err := c.intCmd(buf)
+	codec := newCodec("*3\r\n$4\r\nMOVE\r\n$")
+	codec.addStringInt(key, db)
+	n, err := c.commandInteger(codec)
 	return n != 0, err
 }
 
 // BytesMOVE executes <https://redis.io/commands/move>.
 func (c *Client) BytesMOVE(key []byte, db int64) (bool, error) {
-	buf := writeBuffer("*3\r\n$4\r\nMOVE\r\n$")
-	buf = appendBytesInt(buf, key, db)
-	n, err := c.intCmd(buf)
+	codec := newCodec("*3\r\n$4\r\nMOVE\r\n$")
+	codec.addBytesInt(key, db)
+	n, err := c.commandInteger(codec)
 	return n != 0, err
 }
 
 // FLUSHDB executes <https://redis.io/commands/flushdb>.
 func (c *Client) FLUSHDB(async bool) error {
-	var buf []byte
+	var codec *codec
 	if async {
-		buf = writeBuffer("*2\r\n$7\r\nFLUSHDB\r\n$5\r\nASYNC\r\n")
+		codec = newCodec("*2\r\n$7\r\nFLUSHDB\r\n$5\r\nASYNC\r\n")
 	} else {
-		buf = writeBuffer("*1\r\n$7\r\nFLUSHDB\r\n")
+		codec = newCodec("*1\r\n$7\r\nFLUSHDB\r\n")
 	}
-	return c.okCmd(buf)
+	return c.commandOK(codec)
 }
 
 // FLUSHALL executes <https://redis.io/commands/flushall>.
 func (c *Client) FLUSHALL(async bool) error {
-	var buf []byte
+	var codec *codec
 	if async {
-		buf = writeBuffer("*2\r\n$8\r\nFLUSHALL\r\n$5\r\nASYNC\r\n")
+		codec = newCodec("*2\r\n$8\r\nFLUSHALL\r\n$5\r\nASYNC\r\n")
 	} else {
-		buf = writeBuffer("*1\r\n$8\r\nFLUSHALL\r\n")
+		codec = newCodec("*1\r\n$8\r\nFLUSHALL\r\n")
 	}
-	return c.okCmd(buf)
+	return c.commandOK(codec)
 }
 
 // GET executes <https://redis.io/commands/get>.
 // The return is nil if key does not exist.
 func (c *Client) GET(key string) (value []byte, err error) {
-	buf := writeBuffer("*2\r\n$3\r\nGET\r\n$")
-	buf = appendString(buf, key)
-	return c.bulkCmd(buf)
+	codec := newCodec("*2\r\n$3\r\nGET\r\n$")
+	codec.addString(key)
+	return c.commandBulk(codec)
 }
 
 // BytesGET executes <https://redis.io/commands/get>.
 // The return is nil if key does not exist.
 func (c *Client) BytesGET(key []byte) (value []byte, err error) {
-	buf := writeBuffer("*2\r\n$3\r\nGET\r\n$")
-	buf = appendBytes(buf, key)
-	return c.bulkCmd(buf)
+	codec := newCodec("*2\r\n$3\r\nGET\r\n$")
+	codec.addBytes(key)
+	return c.commandBulk(codec)
 }
 
 // SET executes <https://redis.io/commands/set>.
 func (c *Client) SET(key string, value []byte) error {
-	buf := writeBuffer("*3\r\n$3\r\nSET\r\n$")
-	buf = appendStringBytes(buf, key, value)
-	return c.okCmd(buf)
+	codec := newCodec("*3\r\n$3\r\nSET\r\n$")
+	codec.addStringBytes(key, value)
+	return c.commandOK(codec)
 }
 
 // BytesSET executes <https://redis.io/commands/set>.
 func (c *Client) BytesSET(key, value []byte) error {
-	buf := writeBuffer("*3\r\n$3\r\nSET\r\n$")
-	buf = appendBytesBytes(buf, key, value)
-	return c.okCmd(buf)
+	codec := newCodec("*3\r\n$3\r\nSET\r\n$")
+	codec.addBytesBytes(key, value)
+	return c.commandOK(codec)
 }
 
 // SETString executes <https://redis.io/commands/set>.
 func (c *Client) SETString(key, value string) error {
-	buf := writeBuffer("*3\r\n$3\r\nSET\r\n$")
-	buf = appendStringString(buf, key, value)
-	return c.okCmd(buf)
+	codec := newCodec("*3\r\n$3\r\nSET\r\n$")
+	codec.addStringString(key, value)
+	return c.commandOK(codec)
 }
 
 // DEL executes <https://redis.io/commands/del>.
 func (c *Client) DEL(key string) (bool, error) {
-	buf := writeBuffer("*2\r\n$3\r\nDEL\r\n$")
-	buf = appendString(buf, key)
-	removed, err := c.intCmd(buf)
+	codec := newCodec("*2\r\n$3\r\nDEL\r\n$")
+	codec.addString(key)
+	removed, err := c.commandInteger(codec)
 	return removed != 0, err
 }
 
 // BytesDEL executes <https://redis.io/commands/del>.
 func (c *Client) BytesDEL(key []byte) (bool, error) {
-	buf := writeBuffer("*2\r\n$3\r\nDEL\r\n$")
-	buf = appendBytes(buf, key)
-	removed, err := c.intCmd(buf)
+	codec := newCodec("*2\r\n$3\r\nDEL\r\n$")
+	codec.addBytes(key)
+	removed, err := c.commandInteger(codec)
 	return removed != 0, err
 }
 
 // INCR executes <https://redis.io/commands/incr>.
 func (c *Client) INCR(key string) (newValue int64, err error) {
-	buf := writeBuffer("*2\r\n$4\r\nINCR\r\n$")
-	buf = appendString(buf, key)
-	return c.intCmd(buf)
+	codec := newCodec("*2\r\n$4\r\nINCR\r\n$")
+	codec.addString(key)
+	return c.commandInteger(codec)
 }
 
 // BytesINCR executes <https://redis.io/commands/incr>.
 func (c *Client) BytesINCR(key []byte) (newValue int64, err error) {
-	buf := writeBuffer("*2\r\n$4\r\nINCR\r\n$")
-	buf = appendBytes(buf, key)
-	return c.intCmd(buf)
+	codec := newCodec("*2\r\n$4\r\nINCR\r\n$")
+	codec.addBytes(key)
+	return c.commandInteger(codec)
 }
 
 // INCRBY executes <https://redis.io/commands/incrby>.
 func (c *Client) INCRBY(key string, increment int64) (newValue int64, err error) {
-	buf := writeBuffer("*3\r\n$6\r\nINCRBY\r\n$")
-	buf = appendStringInt(buf, key, increment)
-	return c.intCmd(buf)
+	codec := newCodec("*3\r\n$6\r\nINCRBY\r\n$")
+	codec.addStringInt(key, increment)
+	return c.commandInteger(codec)
 }
 
 // BytesINCRBY executes <https://redis.io/commands/incrby>.
 func (c *Client) BytesINCRBY(key []byte, increment int64) (newValue int64, err error) {
-	buf := writeBuffer("*3\r\n$6\r\nINCRBY\r\n$")
-	buf = appendBytesInt(buf, key, increment)
-	return c.intCmd(buf)
+	codec := newCodec("*3\r\n$6\r\nINCRBY\r\n$")
+	codec.addBytesInt(key, increment)
+	return c.commandInteger(codec)
 }
 
 // APPEND executes <https://redis.io/commands/append>.
 func (c *Client) APPEND(key string, value []byte) (newLen int64, err error) {
-	buf := writeBuffer("*3\r\n$6\r\nAPPEND\r\n$")
-	buf = appendStringBytes(buf, key, value)
-	return c.intCmd(buf)
+	codec := newCodec("*3\r\n$6\r\nAPPEND\r\n$")
+	codec.addStringBytes(key, value)
+	return c.commandInteger(codec)
 }
 
 // BytesAPPEND executes <https://redis.io/commands/append>.
 func (c *Client) BytesAPPEND(key, value []byte) (newLen int64, err error) {
-	buf := writeBuffer("*3\r\n$6\r\nAPPEND\r\n$")
-	buf = appendBytesBytes(buf, key, value)
-	return c.intCmd(buf)
+	codec := newCodec("*3\r\n$6\r\nAPPEND\r\n$")
+	codec.addBytesBytes(key, value)
+	return c.commandInteger(codec)
 }
 
 // APPENDString executes <https://redis.io/commands/append>.
 func (c *Client) APPENDString(key, value string) (newLen int64, err error) {
-	buf := writeBuffer("*3\r\n$6\r\nAPPEND\r\n$")
-	buf = appendStringString(buf, key, value)
-	return c.intCmd(buf)
+	codec := newCodec("*3\r\n$6\r\nAPPEND\r\n$")
+	codec.addStringString(key, value)
+	return c.commandInteger(codec)
 }
 
 // LLEN executes <https://redis.io/commands/llen>.
 // The return is 0 if key does not exist.
 func (c *Client) LLEN(key string) (int64, error) {
-	buf := writeBuffer("*2\r\n$4\r\nLLEN\r\n$")
-	buf = appendString(buf, key)
-	return c.intCmd(buf)
+	codec := newCodec("*2\r\n$4\r\nLLEN\r\n$")
+	codec.addString(key)
+	return c.commandInteger(codec)
 }
 
 // BytesLLEN executes <https://redis.io/commands/llen>.
 // The return is 0 if key does not exist.
 func (c *Client) BytesLLEN(key []byte) (int64, error) {
-	buf := writeBuffer("*2\r\n$4\r\nLLEN\r\n$")
-	buf = appendBytes(buf, key)
-	return c.intCmd(buf)
+	codec := newCodec("*2\r\n$4\r\nLLEN\r\n$")
+	codec.addBytes(key)
+	return c.commandInteger(codec)
 }
 
 // LINDEX executes <https://redis.io/commands/lindex>.
 // The return is nil if key does not exist.
 // The return is nil if index is out of range.
 func (c *Client) LINDEX(key string, index int64) (value []byte, err error) {
-	buf := writeBuffer("*3\r\n$6\r\nLINDEX\r\n$")
-	buf = appendStringInt(buf, key, index)
-	return c.bulkCmd(buf)
+	codec := newCodec("*3\r\n$6\r\nLINDEX\r\n$")
+	codec.addStringInt(key, index)
+	return c.commandBulk(codec)
 }
 
 // BytesLINDEX executes <https://redis.io/commands/lindex>.
 // The return is nil if key does not exist.
 // The return is nil if index is out of range.
 func (c *Client) BytesLINDEX(key []byte, index int64) (value []byte, err error) {
-	buf := writeBuffer("*3\r\n$6\r\nLINDEX\r\n$")
-	buf = appendBytesInt(buf, key, index)
-	return c.bulkCmd(buf)
+	codec := newCodec("*3\r\n$6\r\nLINDEX\r\n$")
+	codec.addBytesInt(key, index)
+	return c.commandBulk(codec)
 }
 
 // LRANGE executes <https://redis.io/commands/lrange>.
 // The return is empty if key does not exist.
 func (c *Client) LRANGE(key string, start, stop int64) (values [][]byte, err error) {
-	buf := writeBuffer("*4\r\n$6\r\nLRANGE\r\n$")
-	buf = appendStringIntInt(buf, key, start, stop)
-	return c.arrayCmd(buf)
+	codec := newCodec("*4\r\n$6\r\nLRANGE\r\n$")
+	codec.addStringIntInt(key, start, stop)
+	return c.commandArray(codec)
 }
 
 // BytesLRANGE executes <https://redis.io/commands/lrange>.
 // The return is empty if key does not exist.
 func (c *Client) BytesLRANGE(key []byte, start, stop int64) (values [][]byte, err error) {
-	buf := writeBuffer("*4\r\n$6\r\nLRANGE\r\n$")
-	buf = appendBytesIntInt(buf, key, start, stop)
-	return c.arrayCmd(buf)
+	codec := newCodec("*4\r\n$6\r\nLRANGE\r\n$")
+	codec.addBytesIntInt(key, start, stop)
+	return c.commandArray(codec)
 }
 
 // LPOP executes <https://redis.io/commands/lpop>.
 // The return is nil if key does not exist.
 func (c *Client) LPOP(key string) (value []byte, err error) {
-	buf := writeBuffer("*2\r\n$4\r\nLPOP\r\n$")
-	buf = appendString(buf, key)
-	return c.bulkCmd(buf)
+	codec := newCodec("*2\r\n$4\r\nLPOP\r\n$")
+	codec.addString(key)
+	return c.commandBulk(codec)
 }
 
 // BytesLPOP executes <https://redis.io/commands/lpop>.
 // The return is nil if key does not exist.
 func (c *Client) BytesLPOP(key []byte) (value []byte, err error) {
-	buf := writeBuffer("*2\r\n$4\r\nLPOP\r\n$")
-	buf = appendBytes(buf, key)
-	return c.bulkCmd(buf)
+	codec := newCodec("*2\r\n$4\r\nLPOP\r\n$")
+	codec.addBytes(key)
+	return c.commandBulk(codec)
 }
 
 // RPOP executes <https://redis.io/commands/rpop>.
 // The return is nil if key does not exist.
 func (c *Client) RPOP(key string) (value []byte, err error) {
-	buf := writeBuffer("*2\r\n$4\r\nRPOP\r\n$")
-	buf = appendString(buf, key)
-	return c.bulkCmd(buf)
+	codec := newCodec("*2\r\n$4\r\nRPOP\r\n$")
+	codec.addString(key)
+	return c.commandBulk(codec)
 }
 
 // BytesRPOP executes <https://redis.io/commands/rpop>.
 // The return is nil if key does not exist.
 func (c *Client) BytesRPOP(key []byte) (value []byte, err error) {
-	buf := writeBuffer("*2\r\n$4\r\nRPOP\r\n$")
-	buf = appendBytes(buf, key)
-	return c.bulkCmd(buf)
+	codec := newCodec("*2\r\n$4\r\nRPOP\r\n$")
+	codec.addBytes(key)
+	return c.commandBulk(codec)
 }
 
 // LTRIM executes <https://redis.io/commands/ltrim>.
 func (c *Client) LTRIM(key string, start, stop int64) error {
-	buf := writeBuffer("*4\r\n$5\r\nLTRIM\r\n$")
-	buf = appendStringIntInt(buf, key, start, stop)
-	return c.okCmd(buf)
+	codec := newCodec("*4\r\n$5\r\nLTRIM\r\n$")
+	codec.addStringIntInt(key, start, stop)
+	return c.commandOK(codec)
 }
 
 // BytesLTRIM executes <https://redis.io/commands/ltrim>.
 func (c *Client) BytesLTRIM(key []byte, start, stop int64) error {
-	buf := writeBuffer("*4\r\n$5\r\nLTRIM\r\n$")
-	buf = appendBytesIntInt(buf, key, start, stop)
-	return c.okCmd(buf)
+	codec := newCodec("*4\r\n$5\r\nLTRIM\r\n$")
+	codec.addBytesIntInt(key, start, stop)
+	return c.commandOK(codec)
 }
 
 // LSET executes <https://redis.io/commands/lset>.
 func (c *Client) LSET(key string, index int64, value []byte) error {
-	buf := writeBuffer("*4\r\n$4\r\nLSET\r\n$")
-	buf = appendStringIntBytes(buf, key, index, value)
-	return c.okCmd(buf)
+	codec := newCodec("*4\r\n$4\r\nLSET\r\n$")
+	codec.addStringIntBytes(key, index, value)
+	return c.commandOK(codec)
 }
 
 // LSETString executes <https://redis.io/commands/lset>.
 func (c *Client) LSETString(key string, index int64, value string) error {
-	buf := writeBuffer("*4\r\n$4\r\nLSET\r\n$")
-	buf = appendStringIntString(buf, key, index, value)
-	return c.okCmd(buf)
+	codec := newCodec("*4\r\n$4\r\nLSET\r\n$")
+	codec.addStringIntString(key, index, value)
+	return c.commandOK(codec)
 }
 
 // BytesLSET executes <https://redis.io/commands/lset>.
 func (c *Client) BytesLSET(key []byte, index int64, value []byte) error {
-	buf := writeBuffer("*4\r\n$4\r\nLSET\r\n$")
-	buf = appendBytesIntBytes(buf, key, index, value)
-	return c.okCmd(buf)
+	codec := newCodec("*4\r\n$4\r\nLSET\r\n$")
+	codec.addBytesIntBytes(key, index, value)
+	return c.commandOK(codec)
 }
 
 // LPUSH executes <https://redis.io/commands/lpush>.
 func (c *Client) LPUSH(key string, value []byte) (newLen int64, err error) {
-	buf := writeBuffer("*3\r\n$5\r\nLPUSH\r\n$")
-	buf = appendStringBytes(buf, key, value)
-	return c.intCmd(buf)
+	codec := newCodec("*3\r\n$5\r\nLPUSH\r\n$")
+	codec.addStringBytes(key, value)
+	return c.commandInteger(codec)
 }
 
 // BytesLPUSH executes <https://redis.io/commands/lpush>.
 func (c *Client) BytesLPUSH(key, value []byte) (newLen int64, err error) {
-	buf := writeBuffer("*3\r\n$5\r\nLPUSH\r\n$")
-	buf = appendBytesBytes(buf, key, value)
-	return c.intCmd(buf)
+	codec := newCodec("*3\r\n$5\r\nLPUSH\r\n$")
+	codec.addBytesBytes(key, value)
+	return c.commandInteger(codec)
 }
 
 // LPUSHString executes <https://redis.io/commands/lpush>.
 func (c *Client) LPUSHString(key, value string) (newLen int64, err error) {
-	buf := writeBuffer("*3\r\n$5\r\nLPUSH\r\n$")
-	buf = appendStringString(buf, key, value)
-	return c.intCmd(buf)
+	codec := newCodec("*3\r\n$5\r\nLPUSH\r\n$")
+	codec.addStringString(key, value)
+	return c.commandInteger(codec)
 }
 
 // RPUSH executes <https://redis.io/commands/rpush>.
 func (c *Client) RPUSH(key string, value []byte) (newLen int64, err error) {
-	buf := writeBuffer("*3\r\n$5\r\nRPUSH\r\n$")
-	buf = appendStringBytes(buf, key, value)
-	return c.intCmd(buf)
+	codec := newCodec("*3\r\n$5\r\nRPUSH\r\n$")
+	codec.addStringBytes(key, value)
+	return c.commandInteger(codec)
 }
 
 // BytesRPUSH executes <https://redis.io/commands/rpush>.
 func (c *Client) BytesRPUSH(key, value []byte) (newLen int64, err error) {
-	buf := writeBuffer("*3\r\n$5\r\nRPUSH\r\n$")
-	buf = appendBytesBytes(buf, key, value)
-	return c.intCmd(buf)
+	codec := newCodec("*3\r\n$5\r\nRPUSH\r\n$")
+	codec.addBytesBytes(key, value)
+	return c.commandInteger(codec)
 }
 
 // RPUSHString executes <https://redis.io/commands/rpush>.
 func (c *Client) RPUSHString(key, value string) (newLen int64, err error) {
-	buf := writeBuffer("*3\r\n$5\r\nRPUSH\r\n$")
-	buf = appendStringString(buf, key, value)
-	return c.intCmd(buf)
+	codec := newCodec("*3\r\n$5\r\nRPUSH\r\n$")
+	codec.addStringString(key, value)
+	return c.commandInteger(codec)
 }
 
 // HGET executes <https://redis.io/commands/hget>.
 // The return is nil if key does not exist.
 func (c *Client) HGET(key, field string) (value []byte, err error) {
-	buf := writeBuffer("*3\r\n$4\r\nHGET\r\n$")
-	buf = appendStringString(buf, key, field)
-	return c.bulkCmd(buf)
+	codec := newCodec("*3\r\n$4\r\nHGET\r\n$")
+	codec.addStringString(key, field)
+	return c.commandBulk(codec)
 }
 
 // BytesHGET executes <https://redis.io/commands/hget>.
 // The return is nil if key does not exist.
 func (c *Client) BytesHGET(key, field []byte) (value []byte, err error) {
-	buf := writeBuffer("*3\r\n$4\r\nHGET\r\n$")
-	buf = appendBytesBytes(buf, key, field)
-	return c.bulkCmd(buf)
+	codec := newCodec("*3\r\n$4\r\nHGET\r\n$")
+	codec.addBytesBytes(key, field)
+	return c.commandBulk(codec)
 }
 
 // HSET executes <https://redis.io/commands/hset>.
 func (c *Client) HSET(key, field string, value []byte) (newField bool, err error) {
-	buf := writeBuffer("*4\r\n$4\r\nHSET\r\n$")
-	buf = appendStringStringBytes(buf, key, field, value)
-	created, err := c.intCmd(buf)
+	codec := newCodec("*4\r\n$4\r\nHSET\r\n$")
+	codec.addStringStringBytes(key, field, value)
+	created, err := c.commandInteger(codec)
 	return created != 0, err
 }
 
 // BytesHSET executes <https://redis.io/commands/hset>.
 func (c *Client) BytesHSET(key, field, value []byte) (newField bool, err error) {
-	buf := writeBuffer("*4\r\n$4\r\nHSET\r\n$")
-	buf = appendBytesBytesBytes(buf, key, field, value)
-	created, err := c.intCmd(buf)
+	codec := newCodec("*4\r\n$4\r\nHSET\r\n$")
+	codec.addBytesBytesBytes(key, field, value)
+	created, err := c.commandInteger(codec)
 	return created != 0, err
 }
 
 // HSETString executes <https://redis.io/commands/hset>.
 func (c *Client) HSETString(key, field, value string) (updated bool, err error) {
-	buf := writeBuffer("*4\r\n$4\r\nHSET\r\n$")
-	buf = appendStringStringString(buf, key, field, value)
-	replaced, err := c.intCmd(buf)
+	codec := newCodec("*4\r\n$4\r\nHSET\r\n$")
+	codec.addStringStringString(key, field, value)
+	replaced, err := c.commandInteger(codec)
 	return replaced != 0, err
 }
 
 // HDEL executes <https://redis.io/commands/hdel>.
 func (c *Client) HDEL(key, field string) (bool, error) {
-	buf := writeBuffer("*3\r\n$4\r\nHDEL\r\n$")
-	buf = appendStringString(buf, key, field)
-	removed, err := c.intCmd(buf)
+	codec := newCodec("*3\r\n$4\r\nHDEL\r\n$")
+	codec.addStringString(key, field)
+	removed, err := c.commandInteger(codec)
 	return removed != 0, err
 }
 
 // BytesHDEL executes <https://redis.io/commands/hdel>.
 func (c *Client) BytesHDEL(key, field []byte) (bool, error) {
-	buf := writeBuffer("*3\r\n$4\r\nHDEL\r\n$")
-	buf = appendBytesBytes(buf, key, field)
-	removed, err := c.intCmd(buf)
+	codec := newCodec("*3\r\n$4\r\nHDEL\r\n$")
+	codec.addBytesBytes(key, field)
+	removed, err := c.commandInteger(codec)
 	return removed != 0, err
-}
-
-func appendBytes(buf, a []byte) []byte {
-	buf = strconv.AppendUint(buf, uint64(len(a)), 10)
-	buf = append(buf, '\r', '\n')
-	buf = append(buf, a...)
-	buf = append(buf, '\r', '\n')
-	return buf
-}
-
-func appendString(buf []byte, a string) []byte {
-	buf = strconv.AppendUint(buf, uint64(len(a)), 10)
-	buf = append(buf, '\r', '\n')
-	buf = append(buf, a...)
-	buf = append(buf, '\r', '\n')
-	return buf
-}
-
-func appendBytesBytes(buf, a1, a2 []byte) []byte {
-	buf = strconv.AppendUint(buf, uint64(len(a1)), 10)
-	buf = append(buf, '\r', '\n')
-	buf = append(buf, a1...)
-	buf = append(buf, '\r', '\n', '$')
-	buf = strconv.AppendUint(buf, uint64(len(a2)), 10)
-	buf = append(buf, '\r', '\n')
-	buf = append(buf, a2...)
-	buf = append(buf, '\r', '\n')
-	return buf
-}
-
-func appendBytesInt(buf, a1 []byte, a2 int64) []byte {
-	buf = strconv.AppendUint(buf, uint64(len(a1)), 10)
-	buf = append(buf, '\r', '\n')
-	buf = append(buf, a1...)
-	buf = append(buf, '\r', '\n', '$')
-
-	buf = appendDecimal(buf, a2)
-
-	buf = append(buf, '\r', '\n')
-	return buf
-}
-
-func appendStringBytes(buf []byte, a1 string, a2 []byte) []byte {
-	buf = strconv.AppendUint(buf, uint64(len(a1)), 10)
-	buf = append(buf, '\r', '\n')
-	buf = append(buf, a1...)
-	buf = append(buf, '\r', '\n', '$')
-	buf = strconv.AppendUint(buf, uint64(len(a2)), 10)
-	buf = append(buf, '\r', '\n')
-	buf = append(buf, a2...)
-	buf = append(buf, '\r', '\n')
-	return buf
-}
-
-func appendStringInt(buf []byte, a1 string, a2 int64) []byte {
-	buf = strconv.AppendUint(buf, uint64(len(a1)), 10)
-	buf = append(buf, '\r', '\n')
-	buf = append(buf, a1...)
-	buf = append(buf, '\r', '\n', '$')
-
-	buf = appendDecimal(buf, a2)
-
-	buf = append(buf, '\r', '\n')
-	return buf
-}
-
-func appendStringString(buf []byte, a1, a2 string) []byte {
-	buf = strconv.AppendUint(buf, uint64(len(a1)), 10)
-	buf = append(buf, '\r', '\n')
-	buf = append(buf, a1...)
-	buf = append(buf, '\r', '\n', '$')
-	buf = strconv.AppendUint(buf, uint64(len(a2)), 10)
-	buf = append(buf, '\r', '\n')
-	buf = append(buf, a2...)
-	buf = append(buf, '\r', '\n')
-	return buf
-}
-
-func appendBytesBytesBytes(buf, a1, a2, a3 []byte) []byte {
-	buf = strconv.AppendUint(buf, uint64(len(a1)), 10)
-	buf = append(buf, '\r', '\n')
-	buf = append(buf, a1...)
-	buf = append(buf, '\r', '\n', '$')
-	buf = strconv.AppendUint(buf, uint64(len(a2)), 10)
-	buf = append(buf, '\r', '\n')
-	buf = append(buf, a2...)
-	buf = append(buf, '\r', '\n', '$')
-	buf = strconv.AppendUint(buf, uint64(len(a3)), 10)
-	buf = append(buf, '\r', '\n')
-	buf = append(buf, a3...)
-	buf = append(buf, '\r', '\n')
-	return buf
-}
-
-func appendBytesIntBytes(buf, a1 []byte, a2 int64, a3 []byte) []byte {
-	buf = strconv.AppendUint(buf, uint64(len(a1)), 10)
-	buf = append(buf, '\r', '\n')
-	buf = append(buf, a1...)
-	buf = append(buf, '\r', '\n', '$')
-
-	buf = appendDecimal(buf, a2)
-
-	buf = append(buf, '\r', '\n', '$')
-	buf = strconv.AppendUint(buf, uint64(len(a3)), 10)
-	buf = append(buf, '\r', '\n')
-	buf = append(buf, a3...)
-	buf = append(buf, '\r', '\n')
-	return buf
-}
-
-func appendBytesIntInt(buf, a1 []byte, a2, a3 int64) []byte {
-	buf = strconv.AppendUint(buf, uint64(len(a1)), 10)
-	buf = append(buf, '\r', '\n')
-	buf = append(buf, a1...)
-	buf = append(buf, '\r', '\n', '$')
-
-	buf = appendDecimal(buf, a2)
-
-	buf = append(buf, '\r', '\n', '$')
-
-	buf = appendDecimal(buf, a3)
-
-	buf = append(buf, '\r', '\n')
-	return buf
-}
-
-func appendStringIntBytes(buf []byte, a1 string, a2 int64, a3 []byte) []byte {
-	buf = strconv.AppendUint(buf, uint64(len(a1)), 10)
-	buf = append(buf, '\r', '\n')
-	buf = append(buf, a1...)
-	buf = append(buf, '\r', '\n', '$')
-
-	buf = appendDecimal(buf, a2)
-
-	buf = append(buf, '\r', '\n', '$')
-	buf = strconv.AppendUint(buf, uint64(len(a3)), 10)
-	buf = append(buf, '\r', '\n')
-	buf = append(buf, a3...)
-	buf = append(buf, '\r', '\n')
-	return buf
-}
-
-func appendStringIntInt(buf []byte, a1 string, a2, a3 int64) []byte {
-	buf = strconv.AppendUint(buf, uint64(len(a1)), 10)
-	buf = append(buf, '\r', '\n')
-	buf = append(buf, a1...)
-	buf = append(buf, '\r', '\n', '$')
-
-	buf = appendDecimal(buf, a2)
-
-	buf = append(buf, '\r', '\n', '$')
-
-	buf = appendDecimal(buf, a3)
-
-	buf = append(buf, '\r', '\n')
-	return buf
-}
-
-func appendStringIntString(buf []byte, a1 string, a2 int64, a3 string) []byte {
-	buf = strconv.AppendUint(buf, uint64(len(a1)), 10)
-	buf = append(buf, '\r', '\n')
-	buf = append(buf, a1...)
-	buf = append(buf, '\r', '\n', '$')
-
-	buf = appendDecimal(buf, a2)
-
-	buf = append(buf, '\r', '\n', '$')
-	buf = strconv.AppendUint(buf, uint64(len(a3)), 10)
-	buf = append(buf, '\r', '\n')
-	buf = append(buf, a3...)
-	buf = append(buf, '\r', '\n')
-	return buf
-}
-
-func appendStringStringBytes(buf []byte, a1, a2 string, a3 []byte) []byte {
-	buf = strconv.AppendUint(buf, uint64(len(a1)), 10)
-	buf = append(buf, '\r', '\n')
-	buf = append(buf, a1...)
-	buf = append(buf, '\r', '\n', '$')
-	buf = strconv.AppendUint(buf, uint64(len(a2)), 10)
-	buf = append(buf, '\r', '\n')
-	buf = append(buf, a2...)
-	buf = append(buf, '\r', '\n', '$')
-	buf = strconv.AppendUint(buf, uint64(len(a3)), 10)
-	buf = append(buf, '\r', '\n')
-	buf = append(buf, a3...)
-	buf = append(buf, '\r', '\n')
-	return buf
-}
-
-func appendStringStringString(buf []byte, a1, a2, a3 string) []byte {
-	buf = strconv.AppendUint(buf, uint64(len(a1)), 10)
-	buf = append(buf, '\r', '\n')
-	buf = append(buf, a1...)
-	buf = append(buf, '\r', '\n', '$')
-	buf = strconv.AppendUint(buf, uint64(len(a2)), 10)
-	buf = append(buf, '\r', '\n')
-	buf = append(buf, a2...)
-	buf = append(buf, '\r', '\n', '$')
-	buf = strconv.AppendUint(buf, uint64(len(a3)), 10)
-	buf = append(buf, '\r', '\n')
-	buf = append(buf, a3...)
-	buf = append(buf, '\r', '\n')
-	return buf
-}
-
-func appendDecimal(buf []byte, v int64) []byte {
-	sizeOffset := len(buf)
-	sizeOneDecimal := v > -1e8 && v < 1e9
-	if sizeOneDecimal {
-		buf = append(buf, 0, '\r', '\n')
-	} else {
-		buf = append(buf, 0, 0, '\r', '\n')
-	}
-
-	intOffset := len(buf)
-	buf = strconv.AppendInt(buf, v, 10)
-	size := len(buf) - intOffset
-	if sizeOneDecimal {
-		buf[sizeOffset] = byte(size + '0')
-	} else {
-		buf[sizeOffset] = byte(size/10 + '0')
-		buf[sizeOffset+1] = byte(size%10 + '0')
-	}
-	return buf
-}
-
-func (c *Client) okCmd(buf []byte) error {
-	decoder := okDecoders.Get().(okDecoder)
-	if err := c.send(buf, decoder); err != nil {
-		return err
-	}
-
-	// await response
-	err := <-decoder
-	okDecoders.Put(decoder)
-	return err
-}
-
-func (c *Client) intCmd(buf []byte) (int64, error) {
-	decoder := intDecoders.Get().(intDecoder)
-	if err := c.send(buf, decoder); err != nil {
-		return 0, err
-	}
-
-	// await response
-	resp := <-decoder
-	intDecoders.Put(decoder)
-	return resp.Int, resp.Err
-}
-
-func (c *Client) bulkCmd(buf []byte) ([]byte, error) {
-	decoder := bulkDecoders.Get().(bulkDecoder)
-	if err := c.send(buf, decoder); err != nil {
-		return nil, err
-	}
-
-	// await response
-	resp := <-decoder
-	bulkDecoders.Put(decoder)
-	return resp.Bytes, resp.Err
-}
-
-func (c *Client) arrayCmd(buf []byte) ([][]byte, error) {
-	decoder := arrayDecoders.Get().(arrayDecoder)
-	if err := c.send(buf, decoder); err != nil {
-		return nil, err
-	}
-
-	// await response
-	resp := <-decoder
-	arrayDecoders.Put(decoder)
-	return resp.Array, resp.Err
-}
-
-func (c *Client) send(buf []byte, callback decoder) error {
-	var conn net.Conn
-	select {
-	case conn = <-c.writeSem:
-		break // lock aquired
-	case err := <-c.offline:
-		return err
-	}
-
-	// send command
-	if c.timeout != 0 {
-		conn.SetWriteDeadline(time.Now().Add(c.timeout))
-	}
-	if _, err := conn.Write(buf); err != nil {
-		// The write semaphore is not released.
-		c.writeErr <- struct{}{} // does not block
-		return err
-	}
-
-	// expect response
-	c.queue <- callback
-
-	// release lock
-	c.writeSem <- conn
-
-	writeBuffers.Put(&buf)
-
-	return nil
 }

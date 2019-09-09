@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"net"
 	"path/filepath"
-	"sync"
 	"time"
 )
 
@@ -34,13 +33,6 @@ var errNull = errors.New("redis: null")
 
 // ServerError is a message send by the server.
 type ServerError string
-
-func parseError(line []byte) error {
-	if len(line) > 2 && line[0] == '-' && line[len(line)-2] == '\r' {
-		line = line[1 : len(line)-2]
-	}
-	return ServerError(line)
-}
 
 // Error honors the error interface.
 func (e ServerError) Error() string {
@@ -121,7 +113,7 @@ type Client struct {
 	writeErr chan struct{}
 
 	// Pending commands: request send, awaiting response.
-	queue chan decoder
+	queue chan *codec
 
 	// Receives errors when the connection is unavailable.
 	offline chan error
@@ -157,10 +149,12 @@ func NewClient(addr string, timeout, connectTimeout time.Duration) *Client {
 
 		writeSem: make(chan net.Conn, 1), // one shared instance
 		writeErr: make(chan struct{}, 1), // may not block
-		queue:    make(chan decoder, queueSize),
+		queue:    make(chan *codec, queueSize),
 		offline:  make(chan error),
 	}
+
 	go c.manage()
+
 	return c
 }
 
@@ -197,11 +191,13 @@ func (c *Client) manage() {
 		r := bufio.NewReaderSize(conn, conservativeMSS)
 		for {
 			select {
-			case decoder := <-c.queue:
+			case codec := <-c.queue:
 				if c.timeout != 0 {
 					conn.SetReadDeadline(time.Now().Add(c.timeout))
 				}
-				if decoder.decode(r) {
+				ok := codec.decode(r)
+				codec.received <- struct{}{}
+				if ok {
 					continue // command done
 				}
 				// fatal read error
@@ -253,166 +249,98 @@ func (r connLostReader) Read([]byte) (int, error) {
 	return 0, errConnLost
 }
 
-type decoder interface {
-	decode(*bufio.Reader) bool
-}
-
-var okDecoders = sync.Pool{New: func() interface{} { return make(okDecoder) }}
-var intDecoders = sync.Pool{New: func() interface{} { return make(intDecoder) }}
-var bulkDecoders = sync.Pool{New: func() interface{} { return make(bulkDecoder) }}
-var arrayDecoders = sync.Pool{New: func() interface{} { return make(arrayDecoder) }}
-
-type okDecoder chan error
-type intDecoder chan intResponse
-type bulkDecoder chan bulkResponse
-type arrayDecoder chan arrayResponse
-
-func (p okDecoder) decode(r *bufio.Reader) bool {
-	switch line, err := readCRLF(r); {
-	case err != nil:
-		p <- err
-		return false
-	case len(line) > 2 && line[0] == '+' && line[1] == 'O' && line[2] == 'K':
-		p <- nil
-		return true
-	case len(line) > 2 && line[0] == '$' && line[1] == '-' && line[2] == '1':
-		p <- errNull
-		return true
-	case len(line) > 2 && line[0] == '-':
-		p <- parseError(line)
-		return true
-	default:
-		p <- fmt.Errorf("%w; want OK simple string, received %.40q", errProtocol, line)
-		return false
-	}
-}
-
-type intResponse struct {
-	Int int64
-	Err error
-}
-
-func (p intDecoder) decode(r *bufio.Reader) bool {
-	switch line, err := readCRLF(r); {
-	case err != nil:
-		p <- intResponse{Err: err}
-		return false
-	case len(line) > 2 && line[0] == ':':
-		p <- intResponse{Int: ParseInt(line[1 : len(line)-2])}
-		return true
-	case len(line) > 2 && line[0] == '-':
-		p <- intResponse{Err: parseError(line)}
-		return true
-	default:
-		p <- intResponse{Err: fmt.Errorf("%w; want an integer, received %.40q", errProtocol, line)}
-		return false
-	}
-}
-
-type bulkResponse struct {
-	Bytes []byte
-	Err   error
-}
-
-func (p bulkDecoder) decode(r *bufio.Reader) bool {
-	line, err := readCRLF(r)
-	switch {
-	case err != nil:
-		p <- bulkResponse{Err: err}
-		return false
-	case len(line) > 2 && line[0] == '$':
-		bytes, err := readBulk(r, line)
-		p <- bulkResponse{Bytes: bytes, Err: err}
-		return err == nil
-	case len(line) > 2 && line[0] == '-':
-		p <- bulkResponse{Err: parseError(line)}
-		return true
-	default:
-		p <- bulkResponse{Err: fmt.Errorf("%w; want a bulk string, received %.40q", errProtocol, line)}
-		return false
-	}
-}
-
-type arrayResponse struct {
-	Array [][]byte
-	Err   error
-}
-
-func (p arrayDecoder) decode(r *bufio.Reader) bool {
-	var array [][]byte
-	switch line, err := readCRLF(r); {
-	case err != nil:
-		p <- arrayResponse{Err: err}
-		return false
-	case len(line) > 2 && line[0] == '*':
-		// negative means null–zero must be non-nil
-		if size := ParseInt(line[1 : len(line)-2]); size >= 0 {
-			array = make([][]byte, size)
-		}
-	case len(line) > 2 && line[0] == '-':
-		p <- arrayResponse{Err: parseError(line)}
-		return true
-	default:
-		p <- arrayResponse{Err: fmt.Errorf("%w; want an array, received %.40q", errProtocol, line)}
-		return false
+func (c *Client) send(codec *codec) error {
+	var conn net.Conn
+	select {
+	case conn = <-c.writeSem:
+		break // lock aquired
+	case err := <-c.offline:
+		return err
 	}
 
-	// parse elements
-	for i := range array {
-		switch line, err := readCRLF(r); {
-		case err != nil:
-			p <- arrayResponse{Err: err}
-			return false
-		case len(line) > 2 && line[0] == '$':
-			array[i], err = readBulk(r, line)
-			if err != nil {
-				p <- arrayResponse{Err: err}
-				return false
-			}
-		default:
-			p <- arrayResponse{Err: fmt.Errorf("%w; element %d received %q", errProtocol, i, line)}
-			return false
-		}
+	// send command
+	if c.timeout != 0 {
+		conn.SetWriteDeadline(time.Now().Add(c.timeout))
+	}
+	if _, err := conn.Write(codec.buf); err != nil {
+		// The write semaphore is not released.
+		c.writeErr <- struct{}{} // does not block
+		return err
 	}
 
-	p <- arrayResponse{Array: array}
-	return true
+	// await response (in line)
+	c.queue <- codec
+
+	// release lock
+	c.writeSem <- conn
+
+	return nil
 }
 
-// WARNING: line stays only valid until the next read on r.
-func readCRLF(r *bufio.Reader) (line []byte, err error) {
-	line, err = r.ReadSlice('\n')
+func (c *Client) commandOK(codec *codec) error {
+	codec.resultType = okResult
+
+	err := c.send(codec)
 	if err != nil {
-		if err == bufio.ErrBufferFull {
-			err = fmt.Errorf("%w; CRLF exceeds %d bytes: %.40q…", errProtocol, r.Size(), line)
-		}
+		codecPool.Put(codec)
+		return err
+	}
+
+	<-codec.received // await response
+
+	err = codec.result.err
+	codec.result.err = nil
+	codecPool.Put(codec)
+	return err
+}
+
+func (c *Client) commandInteger(codec *codec) (int64, error) {
+	codec.resultType = integerResult
+
+	err := c.send(codec)
+	if err != nil {
+		codecPool.Put(codec)
+		return 0, err
+	}
+
+	<-codec.received // await response
+
+	integer, err := codec.result.integer, codec.result.err
+	codec.result.integer, codec.result.err = 0, nil
+	codecPool.Put(codec)
+	return integer, err
+}
+
+func (c *Client) commandBulk(codec *codec) ([]byte, error) {
+	codec.resultType = bulkResult
+
+	err := c.send(codec)
+	if err != nil {
+		codecPool.Put(codec)
 		return nil, err
 	}
-	return line, nil
+
+	<-codec.received // await response
+
+	bulk, err := codec.result.bulk, codec.result.err
+	codec.result.bulk, codec.result.err = nil, nil
+	codecPool.Put(codec)
+	return bulk, err
 }
 
-func readBulk(r *bufio.Reader, line []byte) ([]byte, error) {
-	if len(line) < 3 {
-		return nil, fmt.Errorf("%w; received empty line: %q", errProtocol, line)
-	}
-	size := ParseInt(line[1 : len(line)-2])
-	if size < 0 {
-		return nil, nil
+func (c *Client) commandArray(codec *codec) ([][]byte, error) {
+	codec.resultType = arrayResult
+
+	err := c.send(codec)
+	if err != nil {
+		codecPool.Put(codec)
+		return nil, err
 	}
 
-	buf := make([]byte, size)
-	if size != 0 {
-		done, err := r.Read(buf)
-		for done < len(buf) && err == nil {
-			var more int
-			more, err = r.Read(buf[done:])
-			done += more
-		}
-		if err != nil {
-			return nil, err
-		}
-	}
+	<-codec.received // await response
 
-	_, err := r.Discard(2) // skip CRLF
-	return buf, err
+	array, err := codec.result.array, codec.result.err
+	codec.result.array, codec.result.err = nil, nil
+	codecPool.Put(codec)
+	return array, err
 }
