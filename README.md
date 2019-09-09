@@ -16,41 +16,55 @@ The following results were measured on a E5-1650 v2 (from the year 2013).
 #### TCP
 
 ```
-BenchmarkSimpleString/sequential-12         	   20076	     59504 ns/op
-BenchmarkSimpleString/parallel-12           	  121870	      9769 ns/op
-BenchmarkInteger/sequential-12              	   20616	     58077 ns/op
-BenchmarkInteger/parallel-12                	  123735	      9620 ns/op
-BenchmarkBulkString/1B/sequential-12        	   20432	     58637 ns/op
-BenchmarkBulkString/1B/parallel-12          	  123364	      9677 ns/op
-BenchmarkBulkString/144B/sequential-12      	   20186	     59357 ns/op
-BenchmarkBulkString/144B/parallel-12        	  120703	      9843 ns/op
-BenchmarkBulkString/20736B/sequential-12    	   15932	     75499 ns/op
-BenchmarkBulkString/20736B/parallel-12      	   36267	     32821 ns/op
-BenchmarkArray/1×8B/sequential-12           	   19417	     61326 ns/op
-BenchmarkArray/1×8B/parallel-12             	  116478	     10162 ns/op
-BenchmarkArray/12×8B/sequential-12          	   18674	     64727 ns/op
-BenchmarkArray/12×8B/parallel-12            	  109290	     10917 ns/op
-BenchmarkArray/144×8B/sequential-12         	   13855	     86633 ns/op
-BenchmarkArray/144×8B/parallel-12           	   48794	     25336 ns/op
+% setenv TEST_REDIS_ADDR localhost
+% go test -bench .
+goos: darwin
+goarch: amd64
+pkg: github.com/pascaldekloe/redis
+BenchmarkSimpleString/sequential-12         	   20311	     58792 ns/op
+BenchmarkSimpleString/parallel-12           	  123637	      9545 ns/op
+BenchmarkInteger/sequential-12              	   20932	     57337 ns/op
+BenchmarkInteger/parallel-12                	  125294	      9412 ns/op
+BenchmarkBulkString/1B/sequential-12        	   20614	     58095 ns/op
+BenchmarkBulkString/1B/parallel-12          	  123476	      9506 ns/op
+BenchmarkBulkString/144B/sequential-12      	   20310	     59293 ns/op
+BenchmarkBulkString/144B/parallel-12        	  122462	      9681 ns/op
+BenchmarkBulkString/20736B/sequential-12    	   16248	     74041 ns/op
+BenchmarkBulkString/20736B/parallel-12      	   37521	     32471 ns/op
+BenchmarkArray/1×8B/sequential-12           	   19658	     60909 ns/op
+BenchmarkArray/1×8B/parallel-12             	  118478	      9983 ns/op
+BenchmarkArray/12×8B/sequential-12          	   18774	     63937 ns/op
+BenchmarkArray/12×8B/parallel-12            	  109963	     10732 ns/op
+BenchmarkArray/144×8B/sequential-12         	   13960	     85876 ns/op
+BenchmarkArray/144×8B/parallel-12           	   48681	     24483 ns/op
+PASS
+ok  	github.com/pascaldekloe/redis	25.554s
 ```
 
 #### Unix Domain Socket
 
 ```
-BenchmarkSimpleString/sequential-12         	   36267	     32912 ns/op
-BenchmarkSimpleString/parallel-12           	  204867	      5699 ns/op
-BenchmarkInteger/sequential-12              	   37681	     31813 ns/op
-BenchmarkInteger/parallel-12                	  210139	      5511 ns/op
-BenchmarkBulkString/1B/sequential-12        	   36902	     32574 ns/op
-BenchmarkBulkString/1B/parallel-12          	  212095	      5561 ns/op
-BenchmarkBulkString/144B/sequential-12      	   35874	     33455 ns/op
-BenchmarkBulkString/144B/parallel-12        	  208605	      5678 ns/op
-BenchmarkBulkString/20736B/sequential-12    	   15589	     77267 ns/op
-BenchmarkBulkString/20736B/parallel-12      	   22905	     52213 ns/op
-BenchmarkArray/1×8B/sequential-12           	   34530	     34630 ns/op
-BenchmarkArray/1×8B/parallel-12             	  190671	      6102 ns/op
-BenchmarkArray/12×8B/sequential-12          	   32229	     37111 ns/op
-BenchmarkArray/12×8B/parallel-12            	  164794	      7125 ns/op
-BenchmarkArray/144×8B/sequential-12         	   20258	     59222 ns/op
-BenchmarkArray/144×8B/parallel-12           	   52867	     22336 ns/op
+% setenv TEST_REDIS_ADDR /var/run/redis.sock
+% go test -bench .
+goos: darwin
+goarch: amd64
+pkg: github.com/pascaldekloe/redis
+BenchmarkSimpleString/sequential-12         	   38068	     31202 ns/op
+BenchmarkSimpleString/parallel-12           	  211083	      5486 ns/op
+BenchmarkInteger/sequential-12              	   39561	     30262 ns/op
+BenchmarkInteger/parallel-12                	  217764	      5373 ns/op
+BenchmarkBulkString/1B/sequential-12        	   38583	     30995 ns/op
+BenchmarkBulkString/1B/parallel-12          	  218179	      5374 ns/op
+BenchmarkBulkString/144B/sequential-12      	   37426	     32065 ns/op
+BenchmarkBulkString/144B/parallel-12        	  210168	      5498 ns/op
+BenchmarkBulkString/20736B/sequential-12    	   15894	     75305 ns/op
+BenchmarkBulkString/20736B/parallel-12      	   24069	     49771 ns/op
+BenchmarkArray/1×8B/sequential-12           	   35386	     33714 ns/op
+BenchmarkArray/1×8B/parallel-12             	  194251	      6049 ns/op
+BenchmarkArray/12×8B/sequential-12          	   32833	     36484 ns/op
+BenchmarkArray/12×8B/parallel-12            	  167574	      6911 ns/op
+BenchmarkArray/144×8B/sequential-12         	   20746	     57730 ns/op
+BenchmarkArray/144×8B/parallel-12           	   53972	     21806 ns/op
+PASS
+ok  	github.com/pascaldekloe/redis	23.386s
 ```
