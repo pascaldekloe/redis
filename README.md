@@ -5,6 +5,9 @@
 
 … a redis client for the Go programming language.
 
+The implementation utilises a single network connection with asynchronous I/O.
+Connection multiplexing causes overhead and higher latencies for all commands.
+
 This is free and unencumbered software released into the
 [public domain](https://creativecommons.org/publicdomain/zero/1.0).
 

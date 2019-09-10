@@ -1,5 +1,7 @@
-// Package redis provides Redis service access. All communication is fully
-// asynchronous. See https://redis.io/topics/pipelining for details.
+// Package redis provides Redis service access. The implementation utilises a
+// single network connection. Redis supports asynchronous I/O to optimize
+// concurrent workflows. See <https://redis.io/topics/pipelining> for details.
+// Use a separate Client when executing commands that may block, like FLUSHDB.
 package redis
 
 import (
