@@ -75,52 +75,46 @@ func (c *codec) decode(r *bufio.Reader) bool {
 		}
 
 	case integerResult:
-		switch {
-		case line[0] == ':':
-			c.result.integer = ParseInt(line[1 : len(line)-2])
-			return true
-		default:
+		if line[0] != ':' {
 			c.result.err = fmt.Errorf("%w; want an integer, received %.40q", errProtocol, line)
 			return false
 		}
+		c.result.integer = ParseInt(line[1 : len(line)-2])
+		return true
 
 	case bulkResult:
-		switch {
-		case line[0] == '$':
-			c.result.bulk, c.result.err = readBulk(r, line)
-			return c.result.err == nil
-		default:
+		if line[0] != '$' {
 			c.result.err = fmt.Errorf("%w; want a bulk string, received %.40q", errProtocol, line)
 			return false
 		}
+		c.result.bulk, c.result.err = readBulk(r, line)
+		return c.result.err == nil
 
 	case arrayResult:
-		var array [][]byte
-		switch {
-		case line[0] == '*':
-			// negative means null–zero must be non-nil
-			if size := ParseInt(line[1 : len(line)-2]); size >= 0 {
-				array = make([][]byte, size)
-			}
-		default:
+		if line[0] != '*' {
 			c.result.err = fmt.Errorf("%w; want an array, received %.40q", errProtocol, line)
 			return false
+		}
+		var array [][]byte
+		// negative means null–zero must be non-nil
+		if size := ParseInt(line[1 : len(line)-2]); size >= 0 {
+			array = make([][]byte, size)
 		}
 
 		// parse elements
 		for i := range array {
-			switch line, err := readCRLF(r); {
-			case err != nil:
+			line, err := readCRLF(r)
+			if err != nil {
 				c.result.err = err
 				return false
-			case len(line) > 2 && line[0] == '$':
-				array[i], err = readBulk(r, line)
-				if err != nil {
-					c.result.err = err
-					return false
-				}
-			default:
-				c.result.err = fmt.Errorf("%w; element %d received %q", errProtocol, i, line)
+			}
+			if len(line) < 3 || line[0] != '$' {
+				c.result.err = fmt.Errorf("%w; array element %d received %q", errProtocol, i, line)
+				return false
+			}
+			array[i], err = readBulk(r, line)
+			if err != nil {
+				c.result.err = err
 				return false
 			}
 		}
