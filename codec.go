@@ -87,7 +87,7 @@ func (c *codec) decode(r *bufio.Reader) bool {
 			c.result.err = fmt.Errorf("%w; want a bulk string, received %.40q", errProtocol, line)
 			return false
 		}
-		c.result.bulk, c.result.err = readBulk(r, line)
+		c.result.err = readBulk(r, &c.result.bulk, line)
 		return c.result.err == nil
 
 	case arrayResult:
@@ -112,7 +112,7 @@ func (c *codec) decode(r *bufio.Reader) bool {
 				c.result.err = fmt.Errorf("%w; array element %d received %q", errProtocol, i, line)
 				return false
 			}
-			array[i], err = readBulk(r, line)
+			err = readBulk(r, &array[i], line)
 			if err != nil {
 				c.result.err = err
 				return false
@@ -141,30 +141,31 @@ func readCRLF(r *bufio.Reader) (line []byte, err error) {
 	return line, nil
 }
 
-func readBulk(r *bufio.Reader, line []byte) ([]byte, error) {
+func readBulk(r *bufio.Reader, dest *[]byte, line []byte) error {
 	if len(line) < 3 {
-		return nil, fmt.Errorf("%w; received empty line: %q", errProtocol, line)
+		return fmt.Errorf("%w; received empty line: %q", errProtocol, line)
 	}
 	size := ParseInt(line[1 : len(line)-2])
 	if size < 0 {
-		return nil, nil
+		return nil
 	}
 
-	buf := make([]byte, size)
+	*dest = make([]byte, size)
 	if size != 0 {
-		done, err := r.Read(buf)
-		for done < len(buf) && err == nil {
+		done, err := r.Read(*dest)
+		for done < len(*dest) && err == nil {
 			var more int
-			more, err = r.Read(buf[done:])
+			more, err = r.Read((*dest)[done:])
 			done += more
 		}
 		if err != nil {
-			return nil, err
+			*dest = nil
+			return err
 		}
 	}
 
 	_, err := r.Discard(2) // skip CRLF
-	return buf, err
+	return err
 }
 
 func (codec *codec) addBytes(a []byte) {
