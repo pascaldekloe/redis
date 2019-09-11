@@ -161,7 +161,6 @@ func NewClient(addr string, timeout, connectTimeout time.Duration) *Client {
 }
 
 func (c *Client) manage() {
-	var notify chan error
 	for {
 		// connect
 		network := "tcp"
@@ -170,18 +169,19 @@ func (c *Client) manage() {
 		}
 		conn, err := net.DialTimeout(network, c.Addr, c.connectTimeout)
 		if err != nil {
-			if notify == nil {
-				notify = make(chan error)
-				go c.notifyOffline(notify)
+			for {
+				select {
+				case c.offline <- err:
+					continue // notified a command request
+				default:
+					break // no more blocked commands
+				}
+				break
 			}
-			notify <- err
 			continue
 		}
-		if notify != nil {
-			close(notify)
-			notify = nil
-		}
 
+		// TCP parameter tuning
 		if tcp, ok := conn.(*net.TCPConn); ok {
 			tcp.SetNoDelay(false)
 			tcp.SetLinger(0)
@@ -224,23 +224,6 @@ func (c *Client) manage() {
 		for len(c.queue) != 0 {
 			r.Reset(connLostReader{})
 			(<-c.queue).decode(r)
-		}
-	}
-}
-
-func (c *Client) notifyOffline(ch chan error) {
-	err := <-ch
-
-	for {
-		select {
-		case c.offline <- err:
-			continue // informed a request
-
-		case err = <-ch:
-			if err == nil {
-				return
-			}
-			// error change/update
 		}
 	}
 }
