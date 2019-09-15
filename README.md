@@ -19,55 +19,115 @@ The following results were measured on a E5-1650 v2 (from the year 2013).
 #### TCP
 
 ```
-% setenv TEST_REDIS_ADDR localhost
-% go test -bench .
-goos: darwin
-goarch: amd64
-pkg: github.com/pascaldekloe/redis
-BenchmarkSimpleString/sequential-12         	   20311	     58792 ns/op
-BenchmarkSimpleString/parallel-12           	  123637	      9545 ns/op
-BenchmarkInteger/sequential-12              	   20932	     57337 ns/op
-BenchmarkInteger/parallel-12                	  125294	      9412 ns/op
-BenchmarkBulkString/1B/sequential-12        	   20614	     58095 ns/op
-BenchmarkBulkString/1B/parallel-12          	  123476	      9506 ns/op
-BenchmarkBulkString/144B/sequential-12      	   20310	     59293 ns/op
-BenchmarkBulkString/144B/parallel-12        	  122462	      9681 ns/op
-BenchmarkBulkString/20736B/sequential-12    	   16248	     74041 ns/op
-BenchmarkBulkString/20736B/parallel-12      	   37521	     32471 ns/op
-BenchmarkArray/1×8B/sequential-12           	   19658	     60909 ns/op
-BenchmarkArray/1×8B/parallel-12             	  118478	      9983 ns/op
-BenchmarkArray/12×8B/sequential-12          	   18774	     63937 ns/op
-BenchmarkArray/12×8B/parallel-12            	  109963	     10732 ns/op
-BenchmarkArray/144×8B/sequential-12         	   13960	     85876 ns/op
-BenchmarkArray/144×8B/parallel-12           	   48681	     24483 ns/op
-PASS
-ok  	github.com/pascaldekloe/redis	25.554s
+name                             time/op
+SimpleString/sequential-12       53.6µs ± 0%
+SimpleString/parallel-12         8.73µs ± 1%
+Integer/sequential-12            52.5µs ± 0%
+Integer/parallel-12              8.65µs ± 1%
+BulkString/1B/sequential-12      52.7µs ± 0%
+BulkString/1B/parallel-12        8.71µs ± 1%
+BulkString/144B/sequential-12    52.4µs ± 1%
+BulkString/144B/parallel-12      8.87µs ± 0%
+BulkString/20736B/sequential-12  70.0µs ± 0%
+BulkString/20736B/parallel-12    29.3µs ± 5%
+Array/1×8B/sequential-12         55.1µs ± 0%
+Array/1×8B/parallel-12           9.00µs ± 1%
+Array/12×8B/sequential-12        55.6µs ± 0%
+Array/12×8B/parallel-12          9.58µs ± 1%
+Array/144×8B/sequential-12       85.5µs ± 0%
+Array/144×8B/parallel-12         21.1µs ± 2%
+
+name                             alloc/op
+SimpleString/sequential-12        0.00B     
+SimpleString/parallel-12          0.00B     
+Integer/sequential-12             0.00B     
+Integer/parallel-12               0.00B     
+BulkString/1B/sequential-12       1.00B ± 0%
+BulkString/1B/parallel-12         1.00B ± 0%
+BulkString/144B/sequential-12      144B ± 0%
+BulkString/144B/parallel-12        144B ± 0%
+BulkString/20736B/sequential-12  21.8kB ± 0%
+BulkString/20736B/parallel-12    21.8kB ± 0%
+Array/1×8B/sequential-12          40.0B ± 0%
+Array/1×8B/parallel-12            40.0B ± 0%
+Array/12×8B/sequential-12          384B ± 0%
+Array/12×8B/parallel-12            384B ± 0%
+Array/144×8B/sequential-12       4.61kB ± 0%
+Array/144×8B/parallel-12         4.61kB ± 0%
+
+name                             allocs/op
+SimpleString/sequential-12         0.00     
+SimpleString/parallel-12           0.00     
+Integer/sequential-12              0.00     
+Integer/parallel-12                0.00     
+BulkString/1B/sequential-12        1.00 ± 0%
+BulkString/1B/parallel-12          1.00 ± 0%
+BulkString/144B/sequential-12      1.00 ± 0%
+BulkString/144B/parallel-12        1.00 ± 0%
+BulkString/20736B/sequential-12    1.00 ± 0%
+BulkString/20736B/parallel-12      1.00 ± 0%
+Array/1×8B/sequential-12           2.00 ± 0%
+Array/1×8B/parallel-12             2.00 ± 0%
+Array/12×8B/sequential-12          13.0 ± 0%
+Array/12×8B/parallel-12            13.0 ± 0%
+Array/144×8B/sequential-12          145 ± 0%
+Array/144×8B/parallel-12            145 ± 0%
 ```
 
 #### Unix Domain Socket
 
 ```
-% setenv TEST_REDIS_ADDR /var/run/redis.sock
-% go test -bench .
-goos: darwin
-goarch: amd64
-pkg: github.com/pascaldekloe/redis
-BenchmarkSimpleString/sequential-12         	   38068	     31202 ns/op
-BenchmarkSimpleString/parallel-12           	  211083	      5486 ns/op
-BenchmarkInteger/sequential-12              	   39561	     30262 ns/op
-BenchmarkInteger/parallel-12                	  217764	      5373 ns/op
-BenchmarkBulkString/1B/sequential-12        	   38583	     30995 ns/op
-BenchmarkBulkString/1B/parallel-12          	  218179	      5374 ns/op
-BenchmarkBulkString/144B/sequential-12      	   37426	     32065 ns/op
-BenchmarkBulkString/144B/parallel-12        	  210168	      5498 ns/op
-BenchmarkBulkString/20736B/sequential-12    	   15894	     75305 ns/op
-BenchmarkBulkString/20736B/parallel-12      	   24069	     49771 ns/op
-BenchmarkArray/1×8B/sequential-12           	   35386	     33714 ns/op
-BenchmarkArray/1×8B/parallel-12             	  194251	      6049 ns/op
-BenchmarkArray/12×8B/sequential-12          	   32833	     36484 ns/op
-BenchmarkArray/12×8B/parallel-12            	  167574	      6911 ns/op
-BenchmarkArray/144×8B/sequential-12         	   20746	     57730 ns/op
-BenchmarkArray/144×8B/parallel-12           	   53972	     21806 ns/op
-PASS
-ok  	github.com/pascaldekloe/redis	23.386s
+name                             time/op
+SimpleString/sequential-12       33.3µs ± 1%
+SimpleString/parallel-12         4.77µs ± 1%
+Integer/sequential-12            32.4µs ± 0%
+Integer/parallel-12              4.73µs ± 0%
+BulkString/1B/sequential-12      33.0µs ± 0%
+BulkString/1B/parallel-12        4.74µs ± 1%
+BulkString/144B/sequential-12    33.8µs ± 0%
+BulkString/144B/parallel-12      4.81µs ± 1%
+BulkString/20736B/sequential-12  82.5µs ± 0%
+BulkString/20736B/parallel-12    50.3µs ± 1%
+Array/1×8B/sequential-12         35.5µs ± 0%
+Array/1×8B/parallel-12           4.96µs ± 1%
+Array/12×8B/sequential-12        36.7µs ± 0%
+Array/12×8B/parallel-12          5.67µs ± 1%
+Array/144×8B/sequential-12       57.0µs ± 0%
+Array/144×8B/parallel-12         18.6µs ± 1%
+
+name                             alloc/op
+SimpleString/sequential-12        0.00B     
+SimpleString/parallel-12          0.00B     
+Integer/sequential-12             0.00B     
+Integer/parallel-12               0.00B     
+BulkString/1B/sequential-12       1.00B ± 0%
+BulkString/1B/parallel-12         1.00B ± 0%
+BulkString/144B/sequential-12      144B ± 0%
+BulkString/144B/parallel-12        144B ± 0%
+BulkString/20736B/sequential-12  21.8kB ± 0%
+BulkString/20736B/parallel-12    21.8kB ± 0%
+Array/1×8B/sequential-12          40.0B ± 0%
+Array/1×8B/parallel-12            40.0B ± 0%
+Array/12×8B/sequential-12          384B ± 0%
+Array/12×8B/parallel-12            384B ± 0%
+Array/144×8B/sequential-12       4.61kB ± 0%
+Array/144×8B/parallel-12         4.61kB ± 0%
+
+name                             allocs/op
+SimpleString/sequential-12         0.00     
+SimpleString/parallel-12           0.00     
+Integer/sequential-12              0.00     
+Integer/parallel-12                0.00     
+BulkString/1B/sequential-12        1.00 ± 0%
+BulkString/1B/parallel-12          1.00 ± 0%
+BulkString/144B/sequential-12      1.00 ± 0%
+BulkString/144B/parallel-12        1.00 ± 0%
+BulkString/20736B/sequential-12    1.00 ± 0%
+BulkString/20736B/parallel-12      1.00 ± 0%
+Array/1×8B/sequential-12           2.00 ± 0%
+Array/1×8B/parallel-12             2.00 ± 0%
+Array/12×8B/sequential-12          13.0 ± 0%
+Array/12×8B/parallel-12            13.0 ± 0%
+Array/144×8B/sequential-12          145 ± 0%
+Array/144×8B/parallel-12            145 ± 0%
 ```
