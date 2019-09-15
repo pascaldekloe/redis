@@ -22,6 +22,8 @@ const (
 	// Number of pending requests per network protocol.
 	queueSizeTCP  = 128
 	queueSizeUnix = 512
+
+	reconnectDelay = 500 * time.Microsecond
 )
 
 // ErrTerminated means that the Client is no longer in use.
@@ -201,12 +203,13 @@ func (c *Client) manage() {
 		}
 		conn, err := net.DialTimeout(network, c.Addr, c.connectTimeout)
 		if err != nil {
+			delay := time.NewTimer(reconnectDelay)
 			for {
 				select {
 				case c.offline <- err:
-					continue // notified a command request
-				default:
-					break // no more blocked commands
+					continue // unblocked a command request
+				case <-delay.C:
+					break
 				}
 				break
 			}
