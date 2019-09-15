@@ -24,6 +24,9 @@ const (
 	queueSizeUnix = 512
 )
 
+// ErrTerminated means that the Client is no longer in use.
+var ErrTerminated = errors.New("redis: client terminated")
+
 // ErrConnLost signals connection loss to response queue.
 var errConnLost = errors.New("redis: connection lost while awaiting response")
 
@@ -117,8 +120,11 @@ type Client struct {
 	// Pending commands: request send, awaiting response.
 	queue chan *codec
 
-	// Receives errors when the connection is unavailable.
+	// Receives when the connection is unavailable.
 	offline chan error
+
+	// Terminate request signal for manage().
+	quit chan struct{}
 }
 
 // NewClient launches a managed connection to a server address.
@@ -153,6 +159,7 @@ func NewClient(addr string, timeout, connectTimeout time.Duration) *Client {
 		writeErr: make(chan struct{}, 1), // may not block
 		queue:    make(chan *codec, queueSize),
 		offline:  make(chan error),
+		quit:     make(chan struct{}, 1),
 	}
 
 	go c.manage()
@@ -160,8 +167,33 @@ func NewClient(addr string, timeout, connectTimeout time.Duration) *Client {
 	return c
 }
 
+// Terminate stops all Client routines, and closes the network connection.
+// Command are rejected with ErrTerminated after return.
+func (c *Client) Terminate() {
+	select {
+	case c.quit <- struct{}{}:
+		break // signal queued
+	default:
+		break // pending signal
+	}
+
+	// await completion
+	for range c.offline {
+		time.Sleep(100 * time.Microsecond)
+	}
+}
+
 func (c *Client) manage() {
+	defer close(c.offline) // causes ErrTerminate
+
 	for {
+		select {
+		case <-c.quit:
+			return // Terminate
+		default:
+			break
+		}
+
 		// connect
 		network := "tcp"
 		if isUnixAddr(c.Addr) {
@@ -193,6 +225,8 @@ func (c *Client) manage() {
 		r := bufio.NewReaderSize(conn, conservativeMSS)
 		for {
 			select {
+			case <-c.quit:
+				return // Terminate
 			case codec := <-c.queue:
 				if c.timeout != 0 {
 					conn.SetReadDeadline(time.Now().Add(c.timeout))
@@ -240,6 +274,9 @@ func (c *Client) send(codec *codec) error {
 	case conn = <-c.writeSem:
 		break // lock aquired
 	case err := <-c.offline:
+		if err == nil { // closed
+			err = ErrTerminated
+		}
 		return err
 	}
 

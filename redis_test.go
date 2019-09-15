@@ -66,9 +66,28 @@ func TestNormalizeAddr(t *testing.T) {
 	}
 }
 
+func TestTerminate(t *testing.T) {
+	c := NewClient(testClient.Addr, 0, 0)
+	c.Terminate()
+
+	err := c.SET(randomKey("test"), nil)
+	if err != ErrTerminated {
+		t.Errorf("got error %q, want %q", err, ErrTerminated)
+	}
+}
+
 func TestUnavailable(t *testing.T) {
 	c := NewClient("doesnotexist.example.com:70", 100*time.Millisecond, 100*time.Millisecond)
-	_, err := c.INCRBY(randomKey("test"), 42)
+	defer func() {
+		c.Terminate()
+
+		err := c.SET(randomKey("test"), nil)
+		if err != ErrTerminated {
+			t.Errorf("got error %q, want %q", err, ErrTerminated)
+		}
+	}()
+
+	err := c.SET(randomKey("test"), nil)
 	var e *net.OpError
 	if !errors.As(err, &e) {
 		t.Fatalf("got error %v, want a net.OpError", err)
