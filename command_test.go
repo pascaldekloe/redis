@@ -419,8 +419,7 @@ func TestHashCRUD(t *testing.T) {
 	ok, err := testClient.HDEL(key, field)
 	if err != nil {
 		t.Errorf("HDEL %q %q error: %s", key, field, err)
-	}
-	if !ok {
+	} else if !ok {
 		t.Errorf("HDEL %q %q got false, want true", key, field)
 	}
 }
@@ -458,9 +457,74 @@ func TestBytesHashCRUD(t *testing.T) {
 	ok, err := testClient.BytesHDEL(key, field)
 	if err != nil {
 		t.Errorf("HDEL %q %q error: %s", key, field, err)
-	}
-	if !ok {
+	} else if !ok {
 		t.Errorf("HDEL %q %q got false, want true", key, field)
+	}
+}
+
+func TestBatchHashCRUD(t *testing.T) {
+	t.Parallel()
+	key := randomKey("test-hash")
+	const field, value, update = "field1", "first-value", "second-value"
+
+	if err := testClient.HMSET(key, []string{field}, [][]byte{[]byte(value)}); err != nil {
+		t.Fatalf("HMSET %q %q %q error: %s", key, field, value, err)
+	}
+
+	if bytesValues, err := testClient.HMGET(key, field); err != nil {
+		t.Errorf("HMGET %q %q error: %s", key, field, err)
+	} else if len(bytesValues) != 1 || string(bytesValues[0]) != value {
+		t.Errorf(`HMGET %q %q got %q, want %q`, key, field, bytesValues, value)
+	}
+
+	if err := testClient.HMSETString(key, []string{field}, []string{update}); err != nil {
+		t.Errorf("HMSET %q %q %q update error: %s", key, field, update, err)
+	} else {
+		if bytesValues, err := testClient.HMGET(key, field); err != nil {
+			t.Errorf("HMGET %q %q error: %s", key, field, err)
+		} else if len(bytesValues) != 1 || string(bytesValues[0]) != update {
+			t.Errorf(`HMGET %q %q got %q, want %q`, key, field, bytesValues, update)
+		}
+	}
+
+	n, err := testClient.HDELArgs(key, field)
+	if err != nil {
+		t.Errorf("HDEL %q %q error: %s", key, field, err)
+	} else if n != 1 {
+		t.Errorf("HDEL %q %q got %d, want 1", key, field, n)
+	}
+}
+
+func TestBytesBatchHashCRUD(t *testing.T) {
+	t.Parallel()
+	key := []byte(randomKey("test-hash"))
+	field, value, update := []byte("field1"), []byte(""), []byte("second-value")
+
+	if err := testClient.BytesHMSET(key, [][]byte{field}, [][]byte{[]byte(value)}); err != nil {
+		t.Fatalf("HMSET %q %q %q error: %s", key, field, value, err)
+	}
+
+	if bytesValues, err := testClient.BytesHMGET(key, field); err != nil {
+		t.Errorf("HMGET %q %q error: %s", key, field, err)
+	} else if len(bytesValues) != 1 || string(bytesValues[0]) != string(value) {
+		t.Errorf(`HMGET %q %q got %q, want %q`, key, field, bytesValues, value)
+	}
+
+	if err := testClient.BytesHMSET(key, [][]byte{field}, [][]byte{update}); err != nil {
+		t.Errorf("HMSET %q %q %q update error: %s", key, field, update, err)
+	} else {
+		if bytesValues, err := testClient.BytesHMGET(key, field); err != nil {
+			t.Errorf("HMGET %q %q error: %s", key, field, err)
+		} else if len(bytesValues) != 1 || string(bytesValues[0]) != string(update) {
+			t.Errorf(`HMGET %q %q got %q, want %q`, key, field, bytesValues, update)
+		}
+	}
+
+	n, err := testClient.BytesHDELArgs(key, field)
+	if err != nil {
+		t.Errorf("HDEL %q %q error: %s", key, field, err)
+	} else if n != 1 {
+		t.Errorf("HDEL %q %q got %d, want 1", key, field, n)
 	}
 }
 

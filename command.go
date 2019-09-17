@@ -354,10 +354,68 @@ func (c *Client) HDEL(key, field string) (bool, error) {
 	return removed != 0, err
 }
 
+// HDELArgs executes <https://redis.io/commands/hdel>.
+func (c *Client) HDELArgs(key string, fields ...string) (int64, error) {
+	codec := newCodecN(2+len(fields), "\r\n$4\r\nHDEL\r\n$")
+	codec.addStringStringList(key, fields)
+	return c.commandInteger(codec)
+}
+
 // BytesHDEL executes <https://redis.io/commands/hdel>.
 func (c *Client) BytesHDEL(key, field []byte) (bool, error) {
 	codec := newCodec("*3\r\n$4\r\nHDEL\r\n$")
 	codec.addBytesBytes(key, field)
 	removed, err := c.commandInteger(codec)
 	return removed != 0, err
+}
+
+// BytesHDELArgs executes <https://redis.io/commands/hdel>.
+func (c *Client) BytesHDELArgs(key []byte, fields ...[]byte) (int64, error) {
+	codec := newCodecN(2+len(fields), "\r\n$4\r\nHDEL\r\n$")
+	codec.addBytesBytesList(key, fields)
+	return c.commandInteger(codec)
+}
+
+// HMGET executes <https://redis.io/commands/hmget>.
+func (c *Client) HMGET(key string, fields ...string) (values [][]byte, err error) {
+	codec := newCodecN(2+len(fields), "\r\n$5\r\nHMGET\r\n$")
+	codec.addStringStringList(key, fields)
+	return c.commandArray(codec)
+}
+
+// BytesHMGET executes <https://redis.io/commands/hmget>.
+func (c *Client) BytesHMGET(key []byte, fields ...[]byte) (values [][]byte, err error) {
+	codec := newCodecN(2+len(fields), "\r\n$5\r\nHMGET\r\n$")
+	codec.addBytesBytesList(key, fields)
+	return c.commandArray(codec)
+}
+
+// BytesHMSET executes <https://redis.io/commands/hmset>.
+func (c *Client) BytesHMSET(key []byte, fields, values [][]byte) error {
+	codec := newCodecN(2+len(fields)*2, "\r\n$5\r\nHMSET\r\n$")
+	err := codec.addBytesBytesBytesMapLists(key, fields, values)
+	if err != nil {
+		return err
+	}
+	return c.commandOK(codec)
+}
+
+// HMSET executes <https://redis.io/commands/hmset>.
+func (c *Client) HMSET(key string, fields []string, values [][]byte) error {
+	codec := newCodecN(2+len(fields)*2, "\r\n$5\r\nHMSET\r\n$")
+	err := codec.addStringStringBytesMapLists(key, fields, values)
+	if err != nil {
+		return err
+	}
+	return c.commandOK(codec)
+}
+
+// HMSETString executes <https://redis.io/commands/hmset>.
+func (c *Client) HMSETString(key string, fields, values []string) error {
+	codec := newCodecN(2+len(fields)*2, "\r\n$5\r\nHMSET\r\n$")
+	err := codec.addStringStringStringMapLists(key, fields, values)
+	if err != nil {
+		return err
+	}
+	return c.commandOK(codec)
 }

@@ -2,10 +2,14 @@ package redis
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"strconv"
 	"sync"
 )
+
+// ErrMapSlices rejects execution due to a broken mapping.
+var ErrMapSlices = errors.New("redis: number of keys doesn't match number of values")
 
 // Result is a generic response container.
 type result struct {
@@ -43,6 +47,14 @@ var codecPool = sync.Pool{
 func newCodec(prefix string) *codec {
 	c := codecPool.Get().(*codec)
 	c.buf = append(c.buf[:0], prefix...)
+	return c
+}
+
+func newCodecN(n int, prefix string) *codec {
+	c := codecPool.Get().(*codec)
+	c.buf = append(c.buf[:0], '*')
+	c.buf = strconv.AppendUint(c.buf, uint64(n), 10)
+	c.buf = append(c.buf, prefix...)
 	return c
 }
 
@@ -193,6 +205,19 @@ func (codec *codec) addBytesBytes(a1, a2 []byte) {
 	codec.buf = append(codec.buf, '\r', '\n')
 }
 
+func (codec *codec) addBytesBytesList(a1 []byte, a2 [][]byte) {
+	codec.buf = strconv.AppendUint(codec.buf, uint64(len(a1)), 10)
+	codec.buf = append(codec.buf, '\r', '\n')
+	codec.buf = append(codec.buf, a1...)
+	for _, b := range a2 {
+		codec.buf = append(codec.buf, '\r', '\n', '$')
+		codec.buf = strconv.AppendUint(codec.buf, uint64(len(b)), 10)
+		codec.buf = append(codec.buf, '\r', '\n')
+		codec.buf = append(codec.buf, b...)
+	}
+	codec.buf = append(codec.buf, '\r', '\n')
+}
+
 func (codec *codec) addBytesInt(a1 []byte, a2 int64) {
 	codec.buf = strconv.AppendUint(codec.buf, uint64(len(a1)), 10)
 	codec.buf = append(codec.buf, '\r', '\n')
@@ -237,6 +262,19 @@ func (codec *codec) addStringString(a1, a2 string) {
 	codec.buf = append(codec.buf, '\r', '\n')
 }
 
+func (codec *codec) addStringStringList(a1 string, a2 []string) {
+	codec.buf = strconv.AppendUint(codec.buf, uint64(len(a1)), 10)
+	codec.buf = append(codec.buf, '\r', '\n')
+	codec.buf = append(codec.buf, a1...)
+	for _, s := range a2 {
+		codec.buf = append(codec.buf, '\r', '\n', '$')
+		codec.buf = strconv.AppendUint(codec.buf, uint64(len(s)), 10)
+		codec.buf = append(codec.buf, '\r', '\n')
+		codec.buf = append(codec.buf, s...)
+	}
+	codec.buf = append(codec.buf, '\r', '\n')
+}
+
 func (codec *codec) addBytesBytesBytes(a1, a2, a3 []byte) {
 	codec.buf = strconv.AppendUint(codec.buf, uint64(len(a1)), 10)
 	codec.buf = append(codec.buf, '\r', '\n')
@@ -250,6 +288,28 @@ func (codec *codec) addBytesBytesBytes(a1, a2, a3 []byte) {
 	codec.buf = append(codec.buf, '\r', '\n')
 	codec.buf = append(codec.buf, a3...)
 	codec.buf = append(codec.buf, '\r', '\n')
+}
+
+func (codec *codec) addBytesBytesBytesMapLists(a1 []byte, a2, a3 [][]byte) error {
+	if len(a2) != len(a3) {
+		return ErrMapSlices
+	}
+	codec.buf = strconv.AppendUint(codec.buf, uint64(len(a1)), 10)
+	codec.buf = append(codec.buf, '\r', '\n')
+	codec.buf = append(codec.buf, a1...)
+	for i, key := range a2 {
+		value := a3[i]
+		codec.buf = append(codec.buf, '\r', '\n', '$')
+		codec.buf = strconv.AppendUint(codec.buf, uint64(len(key)), 10)
+		codec.buf = append(codec.buf, '\r', '\n')
+		codec.buf = append(codec.buf, key...)
+		codec.buf = append(codec.buf, '\r', '\n', '$')
+		codec.buf = strconv.AppendUint(codec.buf, uint64(len(value)), 10)
+		codec.buf = append(codec.buf, '\r', '\n')
+		codec.buf = append(codec.buf, value...)
+	}
+	codec.buf = append(codec.buf, '\r', '\n')
+	return nil
 }
 
 func (codec *codec) addBytesIntBytes(a1 []byte, a2 int64, a3 []byte) {
@@ -355,6 +415,50 @@ func (codec *codec) addStringStringString(a1, a2, a3 string) {
 	codec.buf = append(codec.buf, '\r', '\n')
 	codec.buf = append(codec.buf, a3...)
 	codec.buf = append(codec.buf, '\r', '\n')
+}
+
+func (codec *codec) addStringStringBytesMapLists(a1 string, a2 []string, a3 [][]byte) error {
+	if len(a2) != len(a3) {
+		return ErrMapSlices
+	}
+	codec.buf = strconv.AppendUint(codec.buf, uint64(len(a1)), 10)
+	codec.buf = append(codec.buf, '\r', '\n')
+	codec.buf = append(codec.buf, a1...)
+	for i, key := range a2 {
+		value := a3[i]
+		codec.buf = append(codec.buf, '\r', '\n', '$')
+		codec.buf = strconv.AppendUint(codec.buf, uint64(len(key)), 10)
+		codec.buf = append(codec.buf, '\r', '\n')
+		codec.buf = append(codec.buf, key...)
+		codec.buf = append(codec.buf, '\r', '\n', '$')
+		codec.buf = strconv.AppendUint(codec.buf, uint64(len(value)), 10)
+		codec.buf = append(codec.buf, '\r', '\n')
+		codec.buf = append(codec.buf, value...)
+	}
+	codec.buf = append(codec.buf, '\r', '\n')
+	return nil
+}
+
+func (codec *codec) addStringStringStringMapLists(a1 string, a2, a3 []string) error {
+	if len(a2) != len(a3) {
+		return ErrMapSlices
+	}
+	codec.buf = strconv.AppendUint(codec.buf, uint64(len(a1)), 10)
+	codec.buf = append(codec.buf, '\r', '\n')
+	codec.buf = append(codec.buf, a1...)
+	for i, key := range a2 {
+		value := a3[i]
+		codec.buf = append(codec.buf, '\r', '\n', '$')
+		codec.buf = strconv.AppendUint(codec.buf, uint64(len(key)), 10)
+		codec.buf = append(codec.buf, '\r', '\n')
+		codec.buf = append(codec.buf, key...)
+		codec.buf = append(codec.buf, '\r', '\n', '$')
+		codec.buf = strconv.AppendUint(codec.buf, uint64(len(value)), 10)
+		codec.buf = append(codec.buf, '\r', '\n')
+		codec.buf = append(codec.buf, value...)
+	}
+	codec.buf = append(codec.buf, '\r', '\n')
+	return nil
 }
 
 func (codec *codec) addDecimal(v int64) {
