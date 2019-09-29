@@ -9,7 +9,7 @@ import (
 )
 
 // ErrMapSlices rejects execution due to a broken mapping.
-var ErrMapSlices = errors.New("redis: number of keys doesn't match number of values")
+var errMapSlices = errors.New("redis: number of keys doesn't match number of values")
 
 // Result is a generic response container.
 type result struct {
@@ -280,7 +280,7 @@ func (codec *codec) addBytesBytesBytes(a1, a2, a3 []byte) {
 
 func (codec *codec) addBytesBytesBytesMapLists(a1 []byte, a2, a3 [][]byte) error {
 	if len(a2) != len(a3) {
-		return ErrMapSlices
+		return errMapSlices
 	}
 	codec.buf = strconv.AppendUint(codec.buf, uint64(len(a1)), 10)
 	codec.buf = append(codec.buf, '\r', '\n')
@@ -407,7 +407,7 @@ func (codec *codec) addStringStringString(a1, a2, a3 string) {
 
 func (codec *codec) addStringStringBytesMapLists(a1 string, a2 []string, a3 [][]byte) error {
 	if len(a2) != len(a3) {
-		return ErrMapSlices
+		return errMapSlices
 	}
 	codec.buf = strconv.AppendUint(codec.buf, uint64(len(a1)), 10)
 	codec.buf = append(codec.buf, '\r', '\n')
@@ -429,7 +429,7 @@ func (codec *codec) addStringStringBytesMapLists(a1 string, a2 []string, a3 [][]
 
 func (codec *codec) addStringStringStringMapLists(a1 string, a2, a3 []string) error {
 	if len(a2) != len(a3) {
-		return ErrMapSlices
+		return errMapSlices
 	}
 	codec.buf = strconv.AppendUint(codec.buf, uint64(len(a1)), 10)
 	codec.buf = append(codec.buf, '\r', '\n')
