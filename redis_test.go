@@ -101,17 +101,17 @@ func TestUnavailable(t *testing.T) {
 func TestWriteError(t *testing.T) {
 	timeout := time.After(time.Second)
 	select {
-	case conn := <-testClient.writeSem:
+	case conn := <-testClient.connSem:
 		conn.Close()
 
 		select {
-		case testClient.writeSem <- conn:
+		case testClient.connSem <- conn:
 			break
 		case <-timeout:
-			t.Fatal("write sempahore release timeout")
+			t.Fatal("connection sempahore release timeout")
 		}
 	case <-timeout:
-		t.Fatal("write sempahore aquire timeout")
+		t.Fatal("connection sempahore aquire timeout")
 	}
 
 	_, err := testClient.DEL("key")
@@ -128,23 +128,23 @@ func TestWriteError(t *testing.T) {
 func TestReadError(t *testing.T) {
 	timeout := time.After(time.Second)
 	select {
-	case conn := <-testClient.writeSem:
-		c, ok := conn.(interface{ CloseRead() error })
+	case conn := <-testClient.connSem:
+		c, ok := conn.Conn.(interface{ CloseRead() error })
 		if ok {
 			c.CloseRead()
 		}
 
 		select {
-		case testClient.writeSem <- conn:
+		case testClient.connSem <- conn:
 			if !ok {
 				t.Skip("no CloseRead method on connection")
 			}
 
 		case <-timeout:
-			t.Fatal("write sempahore release timeout")
+			t.Fatal("connection sempahore release timeout")
 		}
 	case <-timeout:
-		t.Fatal("write sempahore aquire timeout")
+		t.Fatal("connection sempahore aquire timeout")
 	}
 
 	_, err := testClient.DEL("key")

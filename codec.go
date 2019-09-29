@@ -29,8 +29,9 @@ const (
 )
 
 type codec struct {
-	buf      []byte
-	received chan struct{} // response reception
+	buf     []byte
+	conn    *redisConn
+	receive chan error
 	result
 	resultType
 }
@@ -38,8 +39,8 @@ type codec struct {
 var codecPool = sync.Pool{
 	New: func() interface{} {
 		return &codec{
-			buf:      make([]byte, 256),
-			received: make(chan struct{}),
+			buf:     make([]byte, 256),
+			receive: make(chan error),
 		}
 	},
 }
@@ -58,54 +59,44 @@ func newCodecN(n int, prefix string) *codec {
 	return c
 }
 
-func (c *codec) decode(r *bufio.Reader) bool {
+func (c *codec) decode(r *bufio.Reader) error {
 	line, err := readCRLF(r)
 	if err != nil {
-		c.result.err = err
-		return false
+		return err
 	}
 	if len(line) < 3 {
-		c.result.err = fmt.Errorf("%w; received empty line %q", errProtocol, line)
-		return false
+		return fmt.Errorf("%w; received empty line %q", errProtocol, line)
 	}
 	if line[0] == '-' {
 		c.result.err = ServerError(line[1 : len(line)-2])
-		return true
+		return nil
 	}
 
 	switch c.resultType {
 	case okResult:
 		switch {
 		case line[0] == '+' && line[1] == 'O' && line[2] == 'K':
-			return true
 		case line[0] == '$' && line[1] == '-' && line[2] == '1':
 			c.result.err = errNull
-			return true
 		default:
-			c.result.err = fmt.Errorf("%w; want OK simple string, received %.40q", errProtocol, line)
-			return false
+			return fmt.Errorf("%w; want OK simple string, received %.40q", errProtocol, line)
 		}
 
 	case integerResult:
 		if line[0] != ':' {
-			c.result.err = fmt.Errorf("%w; want an integer, received %.40q", errProtocol, line)
-			return false
+			return fmt.Errorf("%w; want an integer, received %.40q", errProtocol, line)
 		}
 		c.result.integer = ParseInt(line[1 : len(line)-2])
-		return true
 
 	case bulkResult:
 		if line[0] != '$' {
-			c.result.err = fmt.Errorf("%w; want a bulk string, received %.40q", errProtocol, line)
-			return false
+			return fmt.Errorf("%w; want a bulk string, received %.40q", errProtocol, line)
 		}
-		c.result.err = readBulk(r, &c.result.bulk, line)
-		return c.result.err == nil
+		return readBulk(r, &c.result.bulk, line)
 
 	case arrayResult:
 		if line[0] != '*' {
-			c.result.err = fmt.Errorf("%w; want an array, received %.40q", errProtocol, line)
-			return false
+			return fmt.Errorf("%w; want an array, received %.40q", errProtocol, line)
 		}
 		var array [][]byte
 		// negative means null–zero must be non-nil
@@ -117,28 +108,25 @@ func (c *codec) decode(r *bufio.Reader) bool {
 		for i := range array {
 			line, err := readCRLF(r)
 			if err != nil {
-				c.result.err = err
-				return false
+				return err
 			}
 			if len(line) < 3 || line[0] != '$' {
-				c.result.err = fmt.Errorf("%w; array element %d received %q", errProtocol, i, line)
-				return false
+				return fmt.Errorf("%w; array element %d received %q", errProtocol, i, line)
 			}
 			err = readBulk(r, &array[i], line)
 			if err != nil {
-				c.result.err = err
-				return false
+				return err
 			}
 		}
 
 		c.result.array = array
-		return true
 
 	default:
 		// unreachable
-		c.result.err = fmt.Errorf("redis: result type %d not in use", c.resultType)
-		return false
+		return fmt.Errorf("redis: result type %d not in use", c.resultType)
 	}
+
+	return nil
 }
 
 // WARNING: line stays only valid until the next read on r.
