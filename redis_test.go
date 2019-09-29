@@ -226,6 +226,11 @@ func BenchmarkSimpleString(b *testing.B) {
 
 func BenchmarkInteger(b *testing.B) {
 	key := randomKey("bench")
+	defer func() {
+		if _, err := benchClient.DEL(key); err != nil {
+			b.Error("cleanup error:", err)
+		}
+	}()
 
 	b.Run("sequential", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
