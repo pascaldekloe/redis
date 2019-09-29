@@ -129,7 +129,7 @@ type Client struct {
 	connSem chan *redisConn
 
 	// pending commands: request send, awaiting response
-	queue chan *codec
+	queue chan *resp
 }
 
 // NewClient launches a managed connection to a server address.
@@ -160,7 +160,7 @@ func NewClient(addr string, commandTimeout, connectTimeout time.Duration) *Clien
 		connectTimeout: connectTimeout,
 
 		connSem: make(chan *redisConn, 1), // one shared instance
-		queue:   make(chan *codec, queueSize),
+		queue:   make(chan *resp, queueSize),
 	}
 
 	go c.connect(nil)
@@ -257,7 +257,7 @@ func (c *Client) connect(previous *redisConn) {
 	}
 }
 
-func (c *Client) send(codec *codec) error {
+func (c *Client) send(r *resp) error {
 	// operate in write lock
 	conn := <-c.connSem
 
@@ -275,7 +275,7 @@ func (c *Client) send(codec *codec) error {
 	}
 
 	// send command
-	if _, err := conn.Write(codec.buf); err != nil {
+	if _, err := conn.Write(r.buf); err != nil {
 		// tries to prevent redundant error reporting
 		conn.Conn.(interface{ CloseWrite() error }).CloseWrite()
 
@@ -283,71 +283,71 @@ func (c *Client) send(codec *codec) error {
 		return err
 	}
 
-	codec.conn = conn
+	r.conn = conn
 
 	direct := conn.idle
 	if direct {
 		conn.idle = false
 	} else {
-		c.queue <- codec // enque response
+		c.queue <- r // enque response
 	}
 
 	c.connSem <- conn // release write lock
 
 	if !direct {
 		// await handover of virtual read lock
-		if err := <-codec.receive; err != nil {
+		if err := <-r.receive; err != nil {
 			// queue abandonment
 			return err
 		}
 	}
 
 	if !deadline.IsZero() {
-		codec.conn.SetReadDeadline(deadline)
+		r.conn.SetReadDeadline(deadline)
 	}
 
 	return nil
 }
 
-func (c *Client) commandOK(codec *codec) error {
-	if err := c.send(codec); err != nil {
+func (c *Client) commandOK(r *resp) error {
+	if err := c.send(r); err != nil {
 		return err
 	}
-	userErr, fatalErr := decodeOK(codec.conn.Reader)
-	if err := c.pass(fatalErr, codec); err != nil {
+	userErr, fatalErr := decodeOK(r.conn.Reader)
+	if err := c.pass(fatalErr, r); err != nil {
 		return err
 	}
 	return userErr
 }
 
-func (c *Client) commandInteger(codec *codec) (int64, error) {
-	if err := c.send(codec); err != nil {
+func (c *Client) commandInteger(r *resp) (int64, error) {
+	if err := c.send(r); err != nil {
 		return 0, err
 	}
-	integer, userErr, fatalErr := decodeInteger(codec.conn.Reader)
-	if err := c.pass(fatalErr, codec); err != nil {
+	integer, userErr, fatalErr := decodeInteger(r.conn.Reader)
+	if err := c.pass(fatalErr, r); err != nil {
 		return 0, err
 	}
 	return integer, userErr
 }
 
-func (c *Client) commandBulk(codec *codec) ([]byte, error) {
-	if err := c.send(codec); err != nil {
+func (c *Client) commandBulk(r *resp) ([]byte, error) {
+	if err := c.send(r); err != nil {
 		return nil, err
 	}
-	bulk, userErr, fatalErr := decodeBulk(codec.conn.Reader)
-	if err := c.pass(fatalErr, codec); err != nil {
+	bulk, userErr, fatalErr := decodeBulk(r.conn.Reader)
+	if err := c.pass(fatalErr, r); err != nil {
 		return nil, err
 	}
 	return bulk, userErr
 }
 
-func (c *Client) commandArray(codec *codec) ([][]byte, error) {
-	if err := c.send(codec); err != nil {
+func (c *Client) commandArray(r *resp) ([][]byte, error) {
+	if err := c.send(r); err != nil {
 		return nil, err
 	}
-	array, userErr, fatalErr := decodeArray(codec.conn.Reader)
-	if err := c.pass(fatalErr, codec); err != nil {
+	array, userErr, fatalErr := decodeArray(r.conn.Reader)
+	if err := c.pass(fatalErr, r); err != nil {
 		return nil, err
 	}
 	return array, userErr
@@ -355,14 +355,14 @@ func (c *Client) commandArray(codec *codec) ([][]byte, error) {
 
 // Pass over the virtual read lock to the following command in line.
 // If there are no routines waiting for response, then go in idle mode.
-func (c *Client) pass(err error, codec *codec) error {
+func (c *Client) pass(err error, r *resp) error {
 	if err != nil {
 		conn := <-c.connSem // write lock
 		if conn.err == ErrTerminated {
 			c.connSem <- conn // restore
 			return ErrTerminated
 		}
-		if conn != codec.conn {
+		if conn != r.conn {
 			// new connection already in use
 			c.connSem <- conn // restore
 			return err
@@ -386,7 +386,7 @@ func (c *Client) pass(err error, codec *codec) error {
 
 		case conn := <-c.connSem:
 			// Write is locked to make the idle decision atomic.
-			if conn == codec.conn {
+			if conn == r.conn {
 				select {
 				case next := <-c.queue:
 					// recover from lost race
@@ -401,7 +401,7 @@ func (c *Client) pass(err error, codec *codec) error {
 		}
 	}
 
-	codecPool.Put(codec)
+	respPool.Put(r)
 
 	return nil
 }
