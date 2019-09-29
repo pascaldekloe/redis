@@ -257,36 +257,35 @@ func (c *Client) connect(previous *redisConn) {
 	}
 }
 
-func (c *Client) send(codec *codec) (deadline time.Time, direct bool, err error) {
+func (c *Client) send(codec *codec) error {
 	// operate in write lock
 	conn := <-c.connSem
 
 	// validate connection state
-	err = conn.err
-	if err != nil {
+	if err := conn.err; err != nil {
 		c.connSem <- conn // restore
-		return
+		return err
 	}
 
-	// apply timeout
+	// apply timeout, if any
+	var deadline time.Time
 	if c.commandTimeout != 0 {
 		deadline = time.Now().Add(c.commandTimeout)
 		conn.SetWriteDeadline(deadline)
 	}
 
 	// send command
-	_, err = conn.Write(codec.buf)
-	if err != nil {
+	if _, err := conn.Write(codec.buf); err != nil {
 		// tries to prevent redundant error reporting
 		conn.Conn.(interface{ CloseWrite() error }).CloseWrite()
 
 		go c.connect(conn)
-		return
+		return err
 	}
 
 	codec.conn = conn
 
-	direct = conn.idle
+	direct := conn.idle
 	if direct {
 		conn.idle = false
 	} else {
@@ -294,94 +293,7 @@ func (c *Client) send(codec *codec) (deadline time.Time, direct bool, err error)
 	}
 
 	c.connSem <- conn // release write lock
-	return
-}
 
-func (c *Client) commandOK(codec *codec) error {
-	codec.resultType = okResult
-
-	deadline, direct, err := c.send(codec)
-	if err != nil {
-		codecPool.Put(codec)
-		return err
-	}
-
-	err = c.receive(codec, deadline, direct)
-	if err != nil {
-		return err
-	}
-
-	err = codec.result.err
-	codec.result.err = nil
-	codecPool.Put(codec)
-
-	return err
-}
-
-func (c *Client) commandInteger(codec *codec) (int64, error) {
-	codec.resultType = integerResult
-
-	deadline, direct, err := c.send(codec)
-	if err != nil {
-		codecPool.Put(codec)
-		return 0, err
-	}
-
-	err = c.receive(codec, deadline, direct)
-	if err != nil {
-		return 0, err
-	}
-
-	integer, err := codec.result.integer, codec.result.err
-	codec.result.integer, codec.result.err = 0, nil
-	codecPool.Put(codec)
-
-	return integer, err
-}
-
-func (c *Client) commandBulk(codec *codec) ([]byte, error) {
-	codec.resultType = bulkResult
-
-	deadline, direct, err := c.send(codec)
-	if err != nil {
-		codecPool.Put(codec)
-		return nil, err
-	}
-
-	err = c.receive(codec, deadline, direct)
-	if err != nil {
-		return nil, err
-	}
-
-	bulk, err := codec.result.bulk, codec.result.err
-	codec.result.bulk, codec.result.err = nil, nil
-	codecPool.Put(codec)
-
-	return bulk, err
-}
-
-func (c *Client) commandArray(codec *codec) ([][]byte, error) {
-	codec.resultType = arrayResult
-
-	deadline, direct, err := c.send(codec)
-	if err != nil {
-		codecPool.Put(codec)
-		return nil, err
-	}
-
-	err = c.receive(codec, deadline, direct)
-	if err != nil {
-		return nil, err
-	}
-
-	array, err := codec.result.array, codec.result.err
-	codec.result.array, codec.result.err = nil, nil
-	codecPool.Put(codec)
-
-	return array, err
-}
-
-func (c *Client) receive(codec *codec, deadline time.Time, direct bool) error {
 	if !direct {
 		// await handover of virtual read lock
 		if err := <-codec.receive; err != nil {
@@ -394,7 +306,56 @@ func (c *Client) receive(codec *codec, deadline time.Time, direct bool) error {
 		codec.conn.SetReadDeadline(deadline)
 	}
 
-	err := codec.decode(codec.conn.Reader)
+	return nil
+}
+
+func (c *Client) commandOK(codec *codec) error {
+	if err := c.send(codec); err != nil {
+		return err
+	}
+	userErr, fatalErr := decodeOK(codec.conn.Reader)
+	if err := c.pass(fatalErr, codec); err != nil {
+		return err
+	}
+	return userErr
+}
+
+func (c *Client) commandInteger(codec *codec) (int64, error) {
+	if err := c.send(codec); err != nil {
+		return 0, err
+	}
+	integer, userErr, fatalErr := decodeInteger(codec.conn.Reader)
+	if err := c.pass(fatalErr, codec); err != nil {
+		return 0, err
+	}
+	return integer, userErr
+}
+
+func (c *Client) commandBulk(codec *codec) ([]byte, error) {
+	if err := c.send(codec); err != nil {
+		return nil, err
+	}
+	bulk, userErr, fatalErr := decodeBulk(codec.conn.Reader)
+	if err := c.pass(fatalErr, codec); err != nil {
+		return nil, err
+	}
+	return bulk, userErr
+}
+
+func (c *Client) commandArray(codec *codec) ([][]byte, error) {
+	if err := c.send(codec); err != nil {
+		return nil, err
+	}
+	array, userErr, fatalErr := decodeArray(codec.conn.Reader)
+	if err := c.pass(fatalErr, codec); err != nil {
+		return nil, err
+	}
+	return array, userErr
+}
+
+// Pass over the virtual read lock to the following command in line.
+// If there are no routines waiting for response, then go in idle mode.
+func (c *Client) pass(err error, codec *codec) error {
 	if err != nil {
 		conn := <-c.connSem // write lock
 		if conn.err == ErrTerminated {
@@ -410,9 +371,6 @@ func (c *Client) receive(codec *codec, deadline time.Time, direct bool) error {
 		go c.connect(conn)
 		return fmt.Errorf("redis: connection lost: %w", err)
 	}
-
-	// Pass over the virtual read lock to the following command in line.
-	// If there are no routines waiting for response, then go in idle mode.
 
 	select {
 	case next := <-c.queue:
@@ -442,6 +400,8 @@ func (c *Client) receive(codec *codec, deadline time.Time, direct bool) error {
 			c.connSem <- conn // restore
 		}
 	}
+
+	codecPool.Put(codec)
 
 	return nil
 }

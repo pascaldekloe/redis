@@ -11,29 +11,10 @@ import (
 // ErrMapSlices rejects execution due to a broken mapping.
 var errMapSlices = errors.New("redis: number of keys doesn't match number of values")
 
-// Result is a generic response container.
-type result struct {
-	err     error
-	integer int64
-	bulk    []byte
-	array   [][]byte
-}
-
-type resultType byte
-
-const (
-	okResult resultType = iota
-	integerResult
-	bulkResult
-	arrayResult
-)
-
 type codec struct {
 	buf     []byte
 	conn    *redisConn
 	receive chan error
-	result
-	resultType
 }
 
 var codecPool = sync.Pool{
@@ -59,74 +40,85 @@ func newCodecN(n int, prefix string) *codec {
 	return c
 }
 
-func (c *codec) decode(r *bufio.Reader) error {
+func decodeOK(r *bufio.Reader) (userErr, fatalErr error) {
 	line, err := readCRLF(r)
-	if err != nil {
-		return err
+	switch {
+	case err != nil:
+		return nil, err
+	case len(line) < 3:
+		return nil, fmt.Errorf("%w; received empty line %q", errProtocol, line)
+	case line[0] == '-':
+		return ServerError(line[1 : len(line)-2]), nil
+	case line[0] == '+' && line[1] == 'O' && line[2] == 'K':
+		return nil, nil
+	case line[0] == '$' && line[1] == '-' && line[2] == '1':
+		return errNull, nil
 	}
-	if len(line) < 3 {
-		return fmt.Errorf("%w; received empty line %q", errProtocol, line)
+	return nil, fmt.Errorf("%w; want OK simple string, received %.40q", errProtocol, line)
+}
+
+func decodeInteger(r *bufio.Reader) (integer int64, userErr, fatalErr error) {
+	line, err := readCRLF(r)
+	switch {
+	case err != nil:
+		return 0, nil, err
+	case len(line) < 3:
+		return 0, nil, fmt.Errorf("%w; received empty line %q", errProtocol, line)
+	case line[0] == '-':
+		return 0, ServerError(line[1 : len(line)-2]), nil
+	case line[0] != ':':
+		return 0, nil, fmt.Errorf("%w; want an integer, received %.40q", errProtocol, line)
 	}
-	if line[0] == '-' {
-		c.result.err = ServerError(line[1 : len(line)-2])
-		return nil
+	return ParseInt(line[1 : len(line)-2]), nil, nil
+}
+
+func decodeBulk(r *bufio.Reader) (bulk []byte, userErr, fatalErr error) {
+	line, err := readCRLF(r)
+	switch {
+	case err != nil:
+		return nil, nil, err
+	case len(line) < 3:
+		return nil, nil, fmt.Errorf("%w; received empty line %q", errProtocol, line)
+	case line[0] == '-':
+		return nil, ServerError(line[1 : len(line)-2]), nil
+	case line[0] != '$':
+		return nil, nil, fmt.Errorf("%w; want a bulk string, received %.40q", errProtocol, line)
 	}
+	err = readBulk(r, &bulk, line)
+	return bulk, nil, err
+}
 
-	switch c.resultType {
-	case okResult:
-		switch {
-		case line[0] == '+' && line[1] == 'O' && line[2] == 'K':
-		case line[0] == '$' && line[1] == '-' && line[2] == '1':
-			c.result.err = errNull
-		default:
-			return fmt.Errorf("%w; want OK simple string, received %.40q", errProtocol, line)
-		}
-
-	case integerResult:
-		if line[0] != ':' {
-			return fmt.Errorf("%w; want an integer, received %.40q", errProtocol, line)
-		}
-		c.result.integer = ParseInt(line[1 : len(line)-2])
-
-	case bulkResult:
-		if line[0] != '$' {
-			return fmt.Errorf("%w; want a bulk string, received %.40q", errProtocol, line)
-		}
-		return readBulk(r, &c.result.bulk, line)
-
-	case arrayResult:
-		if line[0] != '*' {
-			return fmt.Errorf("%w; want an array, received %.40q", errProtocol, line)
-		}
-		var array [][]byte
-		// negative means null–zero must be non-nil
-		if size := ParseInt(line[1 : len(line)-2]); size >= 0 {
-			array = make([][]byte, size)
-		}
-
-		// parse elements
-		for i := range array {
-			line, err := readCRLF(r)
-			if err != nil {
-				return err
-			}
-			if len(line) < 3 || line[0] != '$' {
-				return fmt.Errorf("%w; array element %d received %q", errProtocol, i, line)
-			}
-			err = readBulk(r, &array[i], line)
-			if err != nil {
-				return err
-			}
-		}
-
-		c.result.array = array
-
-	default:
-		// unreachable
-		return fmt.Errorf("redis: result type %d not in use", c.resultType)
+func decodeArray(r *bufio.Reader) (array [][]byte, userErr, fatalErr error) {
+	line, err := readCRLF(r)
+	switch {
+	case err != nil:
+		return nil, nil, err
+	case len(line) < 3:
+		return nil, nil, fmt.Errorf("%w; received empty line %q", errProtocol, line)
+	case line[0] == '-':
+		return nil, ServerError(line[1 : len(line)-2]), nil
+	case line[0] != '*':
+		return nil, nil, fmt.Errorf("%w; want an array, received %.40q", errProtocol, line)
 	}
 
-	return nil
+	// negative means null–zero must be non-nil
+	if size := ParseInt(line[1 : len(line)-2]); size >= 0 {
+		array = make([][]byte, size)
+	}
+	for i := range array {
+		line, err := readCRLF(r)
+		if err != nil {
+			return nil, nil, err
+		}
+		if len(line) < 3 || line[0] != '$' {
+			return nil, nil, fmt.Errorf("%w; array element %d received %q", errProtocol, i, line)
+		}
+		err = readBulk(r, &array[i], line)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+	return array, nil, nil
 }
 
 // WARNING: line stays only valid until the next read on r.
