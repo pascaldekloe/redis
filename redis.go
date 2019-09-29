@@ -1,7 +1,6 @@
 // Package redis provides Redis service access. The implementation utilises a
-// single network connection. Redis supports asynchronous I/O to optimize
+// single network connection. Client applies asynchronous I/O to optimize
 // concurrent workflows. See <https://redis.io/topics/pipelining> for details.
-// Use a separate Client when executing commands that may block, like FLUSHDB.
 package redis
 
 import (
@@ -11,6 +10,18 @@ import (
 	"net"
 	"path/filepath"
 	"time"
+)
+
+// Server Limits
+const (
+	// A string value can be at most 512 MiB in length.
+	SizeMax = 512 << 20
+
+	// Redis can handle up to 2³² keys.
+	KeyMax = 2 << 32
+
+	// Every hash, list, set, and sorted set, can hold 2³² − 1 elements.
+	ElementMax = 2<<32 - 1
 )
 
 // Fixed Settings
@@ -112,7 +123,7 @@ type Client struct {
 	// Normalized server address in use. This field is read-only.
 	Addr string
 
-	timeout, connectTimeout time.Duration
+	commandTimeout, connectTimeout time.Duration
 
 	// write lock
 	connSem chan *redisConn
@@ -127,14 +138,13 @@ type Client struct {
 // absolute file path (e.g. "/var/run/redis.sock") to use Unix
 // domain sockets.
 //
-// Timeout limits the command duration. Expiry causes a reconnect,
-// to prevent stale connections. Timeout is disabled with zero.
-//
-// ConnectTimeout limits the duration for connection establishment,
-// including reconnects. Once expired, commands receive the timeout
-// error until the connection restores. Client methods block during
-// connect. Zero defaults to one second.
-func NewClient(addr string, timeout, connectTimeout time.Duration) *Client {
+// A command timeout limits the execution duration when nonzero. Expiry causes a
+// reconnect (to prevent stale connections) and a net.Error with Timeout() true.
+// The connect timeout limits the duration for connection establishment. Command
+// submission blocks on the first attempt. A zero connectTimeout defaults to one
+// second. When connection establishment fails, then command submission receives
+// the error of the last attempt, until the connection restores.
+func NewClient(addr string, commandTimeout, connectTimeout time.Duration) *Client {
 	addr = normalizeAddr(addr)
 	if connectTimeout == 0 {
 		connectTimeout = time.Second
@@ -146,7 +156,7 @@ func NewClient(addr string, timeout, connectTimeout time.Duration) *Client {
 
 	c := &Client{
 		Addr:           addr,
-		timeout:        timeout,
+		commandTimeout: commandTimeout,
 		connectTimeout: connectTimeout,
 
 		connSem: make(chan *redisConn, 1), // one shared instance
@@ -258,9 +268,9 @@ func (c *Client) send(codec *codec) (deadline time.Time, direct bool, err error)
 		return
 	}
 
-	// apply timout
-	if c.timeout != 0 {
-		deadline = time.Now().Add(c.timeout)
+	// apply timeout
+	if c.commandTimeout != 0 {
+		deadline = time.Now().Add(c.commandTimeout)
 		conn.SetWriteDeadline(deadline)
 	}
 
