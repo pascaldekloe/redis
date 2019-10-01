@@ -18,10 +18,10 @@ const (
 	SizeMax = 512 << 20
 
 	// Redis can handle up to 2³² keys.
-	KeyMax = 2 << 32
+	KeyMax = 1 << 32
 
 	// Every hash, list, set, and sorted set, can hold 2³² − 1 elements.
-	ElementMax = 2<<32 - 1
+	ElementMax = 1<<32 - 1
 )
 
 // Fixed Settings
