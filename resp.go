@@ -131,51 +131,53 @@ func readBulk(r *bufio.Reader, dest *[]byte, line []byte) error {
 	return err
 }
 
-// RESP (REdis Serialization Protocol) exchange handle.
-type resp struct {
+type request struct {
 	buf     []byte
-	conn    *redisConn
-	receive chan error
+	receive chan *bufio.Reader
 }
 
-var respPool = sync.Pool{
+func (r *request) free() {
+	requestPool.Put(r)
+}
+
+var requestPool = sync.Pool{
 	New: func() interface{} {
-		return &resp{
+		return &request{
 			buf:     make([]byte, 256),
-			receive: make(chan error),
+			receive: make(chan *bufio.Reader),
 		}
 	},
 }
 
-func newRESP(prefix string) *resp {
-	c := respPool.Get().(*resp)
-	c.buf = append(c.buf[:0], prefix...)
-	return c
+func newRequest(prefix string) *request {
+	r := requestPool.Get().(*request)
+	r.buf = append(r.buf[:0], prefix...)
+	return r
 }
 
-func newRESPSize(n int, prefix string) *resp {
-	c := respPool.Get().(*resp)
-	c.buf = append(c.buf[:0], '*')
-	c.buf = strconv.AppendUint(c.buf, uint64(n), 10)
-	c.buf = append(c.buf, prefix...)
-	return c
+func newRequestSize(n int, prefix string) *request {
+	r := requestPool.Get().(*request)
+	r.buf = append(r.buf[:0], '*')
+	r.buf = strconv.AppendUint(r.buf, uint64(n), 10)
+	r.buf = append(r.buf, prefix...)
+	return r
 }
 
-func (r *resp) addBytes(a []byte) {
+func (r *request) addBytes(a []byte) {
 	r.buf = strconv.AppendUint(r.buf, uint64(len(a)), 10)
 	r.buf = append(r.buf, '\r', '\n')
 	r.buf = append(r.buf, a...)
 	r.buf = append(r.buf, '\r', '\n')
 }
 
-func (r *resp) addString(a string) {
+func (r *request) addString(a string) {
 	r.buf = strconv.AppendUint(r.buf, uint64(len(a)), 10)
 	r.buf = append(r.buf, '\r', '\n')
 	r.buf = append(r.buf, a...)
 	r.buf = append(r.buf, '\r', '\n')
 }
 
-func (r *resp) addBytesBytes(a1, a2 []byte) {
+func (r *request) addBytesBytes(a1, a2 []byte) {
 	r.buf = strconv.AppendUint(r.buf, uint64(len(a1)), 10)
 	r.buf = append(r.buf, '\r', '\n')
 	r.buf = append(r.buf, a1...)
@@ -186,7 +188,7 @@ func (r *resp) addBytesBytes(a1, a2 []byte) {
 	r.buf = append(r.buf, '\r', '\n')
 }
 
-func (r *resp) addBytesBytesList(a1 []byte, a2 [][]byte) {
+func (r *request) addBytesBytesList(a1 []byte, a2 [][]byte) {
 	r.buf = strconv.AppendUint(r.buf, uint64(len(a1)), 10)
 	r.buf = append(r.buf, '\r', '\n')
 	r.buf = append(r.buf, a1...)
@@ -199,7 +201,7 @@ func (r *resp) addBytesBytesList(a1 []byte, a2 [][]byte) {
 	r.buf = append(r.buf, '\r', '\n')
 }
 
-func (r *resp) addBytesInt(a1 []byte, a2 int64) {
+func (r *request) addBytesInt(a1 []byte, a2 int64) {
 	r.buf = strconv.AppendUint(r.buf, uint64(len(a1)), 10)
 	r.buf = append(r.buf, '\r', '\n')
 	r.buf = append(r.buf, a1...)
@@ -210,7 +212,7 @@ func (r *resp) addBytesInt(a1 []byte, a2 int64) {
 	r.buf = append(r.buf, '\r', '\n')
 }
 
-func (r *resp) addStringBytes(a1 string, a2 []byte) {
+func (r *request) addStringBytes(a1 string, a2 []byte) {
 	r.buf = strconv.AppendUint(r.buf, uint64(len(a1)), 10)
 	r.buf = append(r.buf, '\r', '\n')
 	r.buf = append(r.buf, a1...)
@@ -221,7 +223,7 @@ func (r *resp) addStringBytes(a1 string, a2 []byte) {
 	r.buf = append(r.buf, '\r', '\n')
 }
 
-func (r *resp) addStringInt(a1 string, a2 int64) {
+func (r *request) addStringInt(a1 string, a2 int64) {
 	r.buf = strconv.AppendUint(r.buf, uint64(len(a1)), 10)
 	r.buf = append(r.buf, '\r', '\n')
 	r.buf = append(r.buf, a1...)
@@ -232,7 +234,7 @@ func (r *resp) addStringInt(a1 string, a2 int64) {
 	r.buf = append(r.buf, '\r', '\n')
 }
 
-func (r *resp) addStringString(a1, a2 string) {
+func (r *request) addStringString(a1, a2 string) {
 	r.buf = strconv.AppendUint(r.buf, uint64(len(a1)), 10)
 	r.buf = append(r.buf, '\r', '\n')
 	r.buf = append(r.buf, a1...)
@@ -243,7 +245,7 @@ func (r *resp) addStringString(a1, a2 string) {
 	r.buf = append(r.buf, '\r', '\n')
 }
 
-func (r *resp) addStringStringList(a1 string, a2 []string) {
+func (r *request) addStringStringList(a1 string, a2 []string) {
 	r.buf = strconv.AppendUint(r.buf, uint64(len(a1)), 10)
 	r.buf = append(r.buf, '\r', '\n')
 	r.buf = append(r.buf, a1...)
@@ -256,7 +258,7 @@ func (r *resp) addStringStringList(a1 string, a2 []string) {
 	r.buf = append(r.buf, '\r', '\n')
 }
 
-func (r *resp) addBytesBytesBytes(a1, a2, a3 []byte) {
+func (r *request) addBytesBytesBytes(a1, a2, a3 []byte) {
 	r.buf = strconv.AppendUint(r.buf, uint64(len(a1)), 10)
 	r.buf = append(r.buf, '\r', '\n')
 	r.buf = append(r.buf, a1...)
@@ -271,7 +273,7 @@ func (r *resp) addBytesBytesBytes(a1, a2, a3 []byte) {
 	r.buf = append(r.buf, '\r', '\n')
 }
 
-func (r *resp) addBytesBytesBytesMapLists(a1 []byte, a2, a3 [][]byte) error {
+func (r *request) addBytesBytesBytesMapLists(a1 []byte, a2, a3 [][]byte) error {
 	if len(a2) != len(a3) {
 		return errMapSlices
 	}
@@ -293,7 +295,7 @@ func (r *resp) addBytesBytesBytesMapLists(a1 []byte, a2, a3 [][]byte) error {
 	return nil
 }
 
-func (r *resp) addBytesIntBytes(a1 []byte, a2 int64, a3 []byte) {
+func (r *request) addBytesIntBytes(a1 []byte, a2 int64, a3 []byte) {
 	r.buf = strconv.AppendUint(r.buf, uint64(len(a1)), 10)
 	r.buf = append(r.buf, '\r', '\n')
 	r.buf = append(r.buf, a1...)
@@ -308,7 +310,7 @@ func (r *resp) addBytesIntBytes(a1 []byte, a2 int64, a3 []byte) {
 	r.buf = append(r.buf, '\r', '\n')
 }
 
-func (r *resp) addBytesIntInt(a1 []byte, a2, a3 int64) {
+func (r *request) addBytesIntInt(a1 []byte, a2, a3 int64) {
 	r.buf = strconv.AppendUint(r.buf, uint64(len(a1)), 10)
 	r.buf = append(r.buf, '\r', '\n')
 	r.buf = append(r.buf, a1...)
@@ -323,7 +325,7 @@ func (r *resp) addBytesIntInt(a1 []byte, a2, a3 int64) {
 	r.buf = append(r.buf, '\r', '\n')
 }
 
-func (r *resp) addStringIntBytes(a1 string, a2 int64, a3 []byte) {
+func (r *request) addStringIntBytes(a1 string, a2 int64, a3 []byte) {
 	r.buf = strconv.AppendUint(r.buf, uint64(len(a1)), 10)
 	r.buf = append(r.buf, '\r', '\n')
 	r.buf = append(r.buf, a1...)
@@ -338,7 +340,7 @@ func (r *resp) addStringIntBytes(a1 string, a2 int64, a3 []byte) {
 	r.buf = append(r.buf, '\r', '\n')
 }
 
-func (r *resp) addStringIntInt(a1 string, a2, a3 int64) {
+func (r *request) addStringIntInt(a1 string, a2, a3 int64) {
 	r.buf = strconv.AppendUint(r.buf, uint64(len(a1)), 10)
 	r.buf = append(r.buf, '\r', '\n')
 	r.buf = append(r.buf, a1...)
@@ -353,7 +355,7 @@ func (r *resp) addStringIntInt(a1 string, a2, a3 int64) {
 	r.buf = append(r.buf, '\r', '\n')
 }
 
-func (r *resp) addStringIntString(a1 string, a2 int64, a3 string) {
+func (r *request) addStringIntString(a1 string, a2 int64, a3 string) {
 	r.buf = strconv.AppendUint(r.buf, uint64(len(a1)), 10)
 	r.buf = append(r.buf, '\r', '\n')
 	r.buf = append(r.buf, a1...)
@@ -368,7 +370,7 @@ func (r *resp) addStringIntString(a1 string, a2 int64, a3 string) {
 	r.buf = append(r.buf, '\r', '\n')
 }
 
-func (r *resp) addStringStringBytes(a1, a2 string, a3 []byte) {
+func (r *request) addStringStringBytes(a1, a2 string, a3 []byte) {
 	r.buf = strconv.AppendUint(r.buf, uint64(len(a1)), 10)
 	r.buf = append(r.buf, '\r', '\n')
 	r.buf = append(r.buf, a1...)
@@ -383,7 +385,7 @@ func (r *resp) addStringStringBytes(a1, a2 string, a3 []byte) {
 	r.buf = append(r.buf, '\r', '\n')
 }
 
-func (r *resp) addStringStringString(a1, a2, a3 string) {
+func (r *request) addStringStringString(a1, a2, a3 string) {
 	r.buf = strconv.AppendUint(r.buf, uint64(len(a1)), 10)
 	r.buf = append(r.buf, '\r', '\n')
 	r.buf = append(r.buf, a1...)
@@ -398,7 +400,7 @@ func (r *resp) addStringStringString(a1, a2, a3 string) {
 	r.buf = append(r.buf, '\r', '\n')
 }
 
-func (r *resp) addStringStringBytesMapLists(a1 string, a2 []string, a3 [][]byte) error {
+func (r *request) addStringStringBytesMapLists(a1 string, a2 []string, a3 [][]byte) error {
 	if len(a2) != len(a3) {
 		return errMapSlices
 	}
@@ -420,7 +422,7 @@ func (r *resp) addStringStringBytesMapLists(a1 string, a2 []string, a3 [][]byte)
 	return nil
 }
 
-func (r *resp) addStringStringStringMapLists(a1 string, a2, a3 []string) error {
+func (r *request) addStringStringStringMapLists(a1 string, a2, a3 []string) error {
 	if len(a2) != len(a3) {
 		return errMapSlices
 	}
@@ -442,12 +444,12 @@ func (r *resp) addStringStringStringMapLists(a1 string, a2, a3 []string) error {
 	return nil
 }
 
-func (r *resp) addDecimal(v int64) {
+func (r *request) addDecimal(v int64) {
 	r.decimal(v)
 	r.buf = append(r.buf, '\r', '\n')
 }
 
-func (r *resp) decimal(v int64) {
+func (r *request) decimal(v int64) {
 	sizeOffset := len(r.buf)
 	sizeSingleDigit := v > -1e8 && v < 1e9
 	if sizeSingleDigit {
