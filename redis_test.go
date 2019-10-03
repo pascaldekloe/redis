@@ -66,24 +66,24 @@ func TestNormalizeAddr(t *testing.T) {
 	}
 }
 
-func TestTerminate(t *testing.T) {
+func TestClose(t *testing.T) {
 	c := NewClient(testClient.Addr, 0, 0)
-	c.Terminate()
+	c.Close()
 
 	err := c.SET(randomKey("test"), nil)
-	if err != ErrTerminated {
-		t.Errorf("got error %q, want %q", err, ErrTerminated)
+	if err != ErrClosed {
+		t.Errorf("got error %q, want %q", err, ErrClosed)
 	}
 }
 
 func TestUnavailable(t *testing.T) {
 	c := NewClient("doesnotexist.example.com:70", 100*time.Millisecond, 100*time.Millisecond)
 	defer func() {
-		c.Terminate()
+		c.Close()
 
 		err := c.SET(randomKey("test"), nil)
-		if err != ErrTerminated {
-			t.Errorf("got error %q, want %q", err, ErrTerminated)
+		if err != ErrClosed {
+			t.Errorf("got error %q, want %q", err, ErrClosed)
 		}
 	}()
 

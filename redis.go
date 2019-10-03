@@ -37,8 +37,8 @@ const (
 	reconnectDelay = 500 * time.Microsecond
 )
 
-// ErrTerminated rejects execution after Client.Terminate.
-var ErrTerminated = errors.New("redis: client terminated")
+// ErrClosed rejects execution after Client.Close.
+var ErrClosed = errors.New("redis: client closed")
 
 // ErrConnLost signals connection loss to response queue.
 var errConnLost = errors.New("redis: connection lost while awaiting response")
@@ -187,25 +187,26 @@ type redisConn struct {
 	idle *bufio.Reader
 }
 
-// Terminate stops command submission with ErrTerminated.
-// The network connection is closed after all pending commands are dealt with.
-func (c *Client) Terminate() {
+// Close stops command submission with ErrClosed.
+// All pending commands are dealt with on return.
+func (c *Client) Close() error {
 	conn := <-c.connSem
-	if conn.offline == ErrTerminated {
+	if conn.offline == ErrClosed {
 		// redundant invokation
 		c.connSem <- conn // restore
-		return
+		return nil
 	}
 
 	// stop command submission
-	c.connSem <- &redisConn{offline: ErrTerminated}
+	c.connSem <- &redisConn{offline: ErrClosed}
 
 	c.haltReceive(conn)
 	c.cancelQueue()
 
 	if conn.Conn != nil {
-		conn.Close()
+		return conn.Close()
 	}
+	return nil
 }
 
 // Connect populates the connection semaphore.
@@ -222,9 +223,9 @@ func (c *Client) connect() {
 			retry := time.NewTimer(reconnectDelay)
 
 			if !firstAttempt {
-				// remove previous error; unless terminated
+				// remove previous error; unless closed
 				current := <-c.connSem
-				if current.offline == ErrTerminated {
+				if current.offline == ErrClosed {
 					c.connSem <- current // restore
 					return               // abandon
 				}
@@ -240,9 +241,9 @@ func (c *Client) connect() {
 		}
 
 		if !firstAttempt {
-			// clear previous error; unless terminated
+			// clear previous error; unless closed
 			current := <-c.connSem
-			if current.offline == ErrTerminated {
+			if current.offline == ErrClosed {
 				c.connSem <- current // restore
 				conn.Close()         // discard
 				return               // abandon
@@ -439,7 +440,7 @@ func (c *Client) onReceiveError() {
 		case conn := <-c.connSem:
 			// write locked
 			if conn.offline != nil {
-				if conn.offline == ErrTerminated {
+				if conn.offline == ErrClosed {
 					// confirm by accept
 					<-c.readInterrupt
 				}
