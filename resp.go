@@ -97,7 +97,7 @@ func readCRLF(r *bufio.Reader) (line []byte, err error) {
 	line, err = r.ReadSlice('\n')
 	if err != nil {
 		if err == bufio.ErrBufferFull {
-			err = fmt.Errorf("%w; CRLF exceeds %d bytes: %.40q…", errProtocol, len(line), line)
+			err = fmt.Errorf("%w; CRLF exceeds %d bytes: %.40q…", errProtocol, r.Size(), line)
 		}
 		return nil, err
 	}

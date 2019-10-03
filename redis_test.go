@@ -258,7 +258,7 @@ func BenchmarkBulkString(b *testing.B) {
 		}
 	}()
 
-	for _, size := range []int{1, 144, 20736} {
+	for _, size := range []int{1, 144, 20_736} {
 		b.Run(fmt.Sprintf("%dB", size), func(b *testing.B) {
 			if err := benchClient.SET(key, make([]byte, size)); err != nil {
 				b.Fatal("population error:", err)

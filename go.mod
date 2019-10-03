@@ -1,3 +1,3 @@
 module github.com/pascaldekloe/redis
 
-go 1.9
+go 1.13
