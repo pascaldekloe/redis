@@ -68,6 +68,7 @@ func TestNormalizeAddr(t *testing.T) {
 }
 
 func TestClose(t *testing.T) {
+	t.Parallel()
 	c := NewClient(testClient.Addr, 0, 0)
 	if err := c.Close(); err != nil {
 		t.Fatal("close got error:", err)
@@ -84,6 +85,7 @@ func TestClose(t *testing.T) {
 }
 
 func TestCloseBussy(t *testing.T) {
+	t.Parallel()
 	c := NewClient(testClient.Addr, 0, 0)
 	key := randomKey("counter")
 
@@ -123,6 +125,7 @@ func TestCloseBussy(t *testing.T) {
 }
 
 func TestUnavailable(t *testing.T) {
+	t.Parallel()
 	c := NewClient("doesnotexist.example.com:70", 100*time.Millisecond, 100*time.Millisecond)
 	defer func() {
 		c.Close()
@@ -200,6 +203,9 @@ func TestReadError(t *testing.T) {
 }
 
 func TestRedisError(t *testing.T) {
+	// server errors may not interfear with other commands
+	t.Parallel()
+
 	key, value := randomKey("test"), []byte("abc")
 	newLen, err := testClient.APPEND(key, value)
 	if err != nil {
