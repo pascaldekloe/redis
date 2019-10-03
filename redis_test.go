@@ -163,12 +163,12 @@ func TestRedisError(t *testing.T) {
 		t.Errorf("APPEND %q %q got length %d, want %d", key, value, newLen, len(value))
 	}
 
-	_, err = testClient.INCR(key)
+	_, err = testClient.BytesDELArgs()
 	switch e := err.(type) {
 	default:
-		t.Errorf("INC %q got error %v, want a RedisError", key, err)
+		t.Errorf("DEL without arguments got error %v, want a RedisError", err)
 	case ServerError:
-		t.Log("got:", e)
+		t.Log("DEL without arguments got error:", e)
 		if got := e.Prefix(); got != "ERR" {
 			t.Errorf(`error %q got prefix %q, want "ERR"`, err, got)
 		}
@@ -179,7 +179,7 @@ func TestRedisError(t *testing.T) {
 	default:
 		t.Errorf("LINDEX %q got error %v, want a RedisError", key, err)
 	case ServerError:
-		t.Log("got:", e)
+		t.Log("LINDEX on string got error:", e)
 		if got := e.Prefix(); got != "WRONGTYPE" {
 			t.Errorf(`LINDEX %q error %q got prefix %q, want "WRONGTYPE"`, key, err, got)
 		}
@@ -190,7 +190,7 @@ func TestRedisError(t *testing.T) {
 	default:
 		t.Errorf("LRANGE %q got error %v, want a RedisError", key, err)
 	case ServerError:
-		t.Log("got:", e)
+		t.Log("LRANGE on string got error:", e)
 		if got := e.Prefix(); got != "WRONGTYPE" {
 			t.Errorf(`LRANGE %q error %q got prefix %q, want "WRONGTYPE"`, key, err, got)
 		}

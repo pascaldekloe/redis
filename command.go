@@ -90,12 +90,26 @@ func (c *Client) DEL(key string) (bool, error) {
 	return removed != 0, err
 }
 
+// DELArgs executes <https://redis.io/commands/del>.
+func (c *Client) DELArgs(keys ...string) (int64, error) {
+	r := newRequestSize(1+len(keys), "\r\n$3\r\nDEL")
+	r.addStringList(keys)
+	return c.commandInteger(r)
+}
+
 // BytesDEL executes <https://redis.io/commands/del>.
 func (c *Client) BytesDEL(key []byte) (bool, error) {
 	r := newRequest("*2\r\n$3\r\nDEL\r\n$")
 	r.addBytes(key)
 	removed, err := c.commandInteger(r)
 	return removed != 0, err
+}
+
+// BytesDELArgs executes <https://redis.io/commands/del>.
+func (c *Client) BytesDELArgs(keys ...[]byte) (int64, error) {
+	r := newRequestSize(1+len(keys), "\r\n$3\r\nDEL")
+	r.addBytesList(keys)
+	return c.commandInteger(r)
 }
 
 // INCR executes <https://redis.io/commands/incr>.

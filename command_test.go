@@ -118,21 +118,27 @@ func TestBytesKeyCRUD(t *testing.T) {
 func TestKeyAbsent(t *testing.T) {
 	t.Parallel()
 	const key = "doesn't exist"
+	const key2 = "doesn't either"
 
 	bytes, err := testClient.GET(key)
 	if err != nil {
 		t.Errorf("GET %q error: %s", key, err)
-	}
-	if bytes != nil {
+	} else if bytes != nil {
 		t.Errorf("GET %q got %q, want nil", key, bytes)
 	}
 
 	ok, err := testClient.DEL(key)
 	if err != nil {
 		t.Errorf("DEL %q error: %s", key, err)
-	}
-	if ok {
+	} else if ok {
 		t.Errorf("DEL %q got true, want false", key)
+	}
+
+	n, err := testClient.DELArgs(key, key2)
+	if err != nil {
+		t.Errorf("DEL %q %q error: %s", key, key2, err)
+	} else if n != 0 {
+		t.Errorf("DEL %q %q got %d, want 0", key, key2, n)
 	}
 }
 
@@ -487,11 +493,12 @@ func TestBatchHashCRUD(t *testing.T) {
 		}
 	}
 
-	n, err := testClient.HDELArgs(key, field)
+	field2 := "doesn't exist"
+	n, err := testClient.HDELArgs(key, field, field2)
 	if err != nil {
-		t.Errorf("HDEL %q %q error: %s", key, field, err)
+		t.Errorf("HDEL %q %q %q error: %s", key, field, field2, err)
 	} else if n != 1 {
-		t.Errorf("HDEL %q %q got %d, want 1", key, field, n)
+		t.Errorf("HDEL %q %q %q got %d, want 1", key, field, field2, n)
 	}
 }
 
@@ -520,11 +527,12 @@ func TestBytesBatchHashCRUD(t *testing.T) {
 		}
 	}
 
-	n, err := testClient.BytesHDELArgs(key, field)
+	field2 := []byte("doesn't exist")
+	n, err := testClient.BytesHDELArgs(key, field, field2)
 	if err != nil {
-		t.Errorf("HDEL %q %q error: %s", key, field, err)
+		t.Errorf("HDEL %q %q %q error: %s", key, field, field2, err)
 	} else if n != 1 {
-		t.Errorf("HDEL %q %q got %d, want 1", key, field, n)
+		t.Errorf("HDEL %q %q %q got %d, want 1", key, field, field2, n)
 	}
 }
 
@@ -535,16 +543,14 @@ func TestHashAbsent(t *testing.T) {
 	bytes, err := testClient.HGET(key, field)
 	if err != nil {
 		t.Errorf("HGET %q error: %s", key, err)
-	}
-	if bytes != nil {
+	} else if bytes != nil {
 		t.Errorf("HGET %q got %q, want nil", key, bytes)
 	}
 
 	ok, err := testClient.HDEL(key, field)
 	if err != nil {
 		t.Errorf("HDEL %q error: %s", key, err)
-	}
-	if ok {
+	} else if ok {
 		t.Errorf("HDEL %q got true, want false", key)
 	}
 
@@ -557,16 +563,14 @@ func TestHashAbsent(t *testing.T) {
 	bytes, err = testClient.HGET(key, field)
 	if err != nil {
 		t.Errorf("HGET %q error: %s", key, err)
-	}
-	if bytes != nil {
+	} else if bytes != nil {
 		t.Errorf("HGET %q got %q, want nil", key, bytes)
 	}
 
 	ok, err = testClient.HDEL(key, field)
 	if err != nil {
 		t.Errorf("HDEL %q error: %s", key, err)
-	}
-	if ok {
+	} else if ok {
 		t.Errorf("HDEL %q got true, want false", key)
 	}
 }

@@ -177,6 +177,26 @@ func (r *request) addString(a string) {
 	r.buf = append(r.buf, '\r', '\n')
 }
 
+func (r *request) addBytesList(a [][]byte) {
+	for _, b := range a {
+		r.buf = append(r.buf, '\r', '\n', '$')
+		r.buf = strconv.AppendUint(r.buf, uint64(len(b)), 10)
+		r.buf = append(r.buf, '\r', '\n')
+		r.buf = append(r.buf, b...)
+	}
+	r.buf = append(r.buf, '\r', '\n')
+}
+
+func (r *request) addStringList(a []string) {
+	for _, s := range a {
+		r.buf = append(r.buf, '\r', '\n', '$')
+		r.buf = strconv.AppendUint(r.buf, uint64(len(s)), 10)
+		r.buf = append(r.buf, '\r', '\n')
+		r.buf = append(r.buf, s...)
+	}
+	r.buf = append(r.buf, '\r', '\n')
+}
+
 func (r *request) addBytesBytes(a1, a2 []byte) {
 	r.buf = strconv.AppendUint(r.buf, uint64(len(a1)), 10)
 	r.buf = append(r.buf, '\r', '\n')
