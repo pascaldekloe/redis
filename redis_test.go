@@ -9,6 +9,7 @@ import (
 	"math/rand"
 	"net"
 	"os"
+	"runtime"
 	"strconv"
 	"testing"
 	"time"
@@ -68,11 +69,56 @@ func TestNormalizeAddr(t *testing.T) {
 
 func TestClose(t *testing.T) {
 	c := NewClient(testClient.Addr, 0, 0)
-	c.Close()
+	if err := c.Close(); err != nil {
+		t.Fatal("close got error:", err)
+	}
 
 	err := c.SET(randomKey("test"), nil)
 	if err != ErrClosed {
-		t.Errorf("got error %q, want %q", err, ErrClosed)
+		t.Errorf("command got error %q, want %q", err, ErrClosed)
+	}
+
+	if err := c.Close(); err != nil {
+		t.Fatal("second close got error:", err)
+	}
+}
+
+func TestCloseBussy(t *testing.T) {
+	c := NewClient(testClient.Addr, 0, 0)
+	key := randomKey("counter")
+
+	timeout := time.NewTimer(time.Second)
+
+	// launch command loops
+	exit := make(chan error, runtime.GOMAXPROCS(0))
+	for routines := cap(exit); routines > 0; routines-- {
+		go func() {
+			for {
+				_, err := c.INCR(key)
+				if err != nil {
+					exit <- err
+					return
+				}
+			}
+		}()
+	}
+
+	// await full I/O activity
+	time.Sleep(2 * time.Millisecond)
+	t.Log(len(c.readQueue), "pending commands")
+
+	if err := c.Close(); err != nil {
+		t.Fatal("close got error:", err)
+	}
+	for i := 0; i < cap(exit); i++ {
+		select {
+		case <-timeout.C:
+			t.Fatalf("%d out of %d command routines stopped before timeout", i, cap(exit))
+		case err := <-exit:
+			if err != ErrClosed {
+				t.Errorf("got exit error %q, want %q", err, ErrClosed)
+			}
+		}
 	}
 }
 
