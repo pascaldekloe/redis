@@ -12,6 +12,22 @@ This is free and unencumbered software released into the
 [public domain](https://creativecommons.org/publicdomain/zero/1.0).
 
 
+## Use
+
+```go
+// Redis is a thread-safe client.
+var Redis = redis.NewClient("localhost", time.Second, timeSecond)
+
+func demo() {
+	newLen, err := Redis.RPUSHString("demo_list", "foo")
+	if err != nil {
+		return err // complete description in place
+	}
+	log.Printf("demo_list has %d elements now", newLen)
+}
+```
+
+
 ## Performance
 
 A local Unix domain socket connection is roughly twice as fast than TCP.
