@@ -221,6 +221,25 @@ func (r *request) addBytesBytesList(a1 []byte, a2 [][]byte) {
 	r.buf = append(r.buf, '\r', '\n')
 }
 
+func (r *request) addBytesBytesMapLists(a1, a2 [][]byte) error {
+	if len(a1) != len(a2) {
+		return errMapSlices
+	}
+	for i, key := range a1 {
+		value := a2[i]
+		r.buf = append(r.buf, '\r', '\n', '$')
+		r.buf = strconv.AppendUint(r.buf, uint64(len(key)), 10)
+		r.buf = append(r.buf, '\r', '\n')
+		r.buf = append(r.buf, key...)
+		r.buf = append(r.buf, '\r', '\n', '$')
+		r.buf = strconv.AppendUint(r.buf, uint64(len(value)), 10)
+		r.buf = append(r.buf, '\r', '\n')
+		r.buf = append(r.buf, value...)
+	}
+	r.buf = append(r.buf, '\r', '\n')
+	return nil
+}
+
 func (r *request) addBytesInt(a1 []byte, a2 int64) {
 	r.buf = strconv.AppendUint(r.buf, uint64(len(a1)), 10)
 	r.buf = append(r.buf, '\r', '\n')
@@ -243,6 +262,25 @@ func (r *request) addStringBytes(a1 string, a2 []byte) {
 	r.buf = append(r.buf, '\r', '\n')
 }
 
+func (r *request) addStringBytesMapLists(a1 []string, a2 [][]byte) error {
+	if len(a1) != len(a2) {
+		return errMapSlices
+	}
+	for i, key := range a1 {
+		value := a2[i]
+		r.buf = append(r.buf, '\r', '\n', '$')
+		r.buf = strconv.AppendUint(r.buf, uint64(len(key)), 10)
+		r.buf = append(r.buf, '\r', '\n')
+		r.buf = append(r.buf, key...)
+		r.buf = append(r.buf, '\r', '\n', '$')
+		r.buf = strconv.AppendUint(r.buf, uint64(len(value)), 10)
+		r.buf = append(r.buf, '\r', '\n')
+		r.buf = append(r.buf, value...)
+	}
+	r.buf = append(r.buf, '\r', '\n')
+	return nil
+}
+
 func (r *request) addStringInt(a1 string, a2 int64) {
 	r.buf = strconv.AppendUint(r.buf, uint64(len(a1)), 10)
 	r.buf = append(r.buf, '\r', '\n')
@@ -263,6 +301,25 @@ func (r *request) addStringString(a1, a2 string) {
 	r.buf = append(r.buf, '\r', '\n')
 	r.buf = append(r.buf, a2...)
 	r.buf = append(r.buf, '\r', '\n')
+}
+
+func (r *request) addStringStringMapLists(a1, a2 []string) error {
+	if len(a1) != len(a2) {
+		return errMapSlices
+	}
+	for i, key := range a1 {
+		value := a2[i]
+		r.buf = append(r.buf, '\r', '\n', '$')
+		r.buf = strconv.AppendUint(r.buf, uint64(len(key)), 10)
+		r.buf = append(r.buf, '\r', '\n')
+		r.buf = append(r.buf, key...)
+		r.buf = append(r.buf, '\r', '\n', '$')
+		r.buf = strconv.AppendUint(r.buf, uint64(len(value)), 10)
+		r.buf = append(r.buf, '\r', '\n')
+		r.buf = append(r.buf, value...)
+	}
+	r.buf = append(r.buf, '\r', '\n')
+	return nil
 }
 
 func (r *request) addStringStringList(a1 string, a2 []string) {

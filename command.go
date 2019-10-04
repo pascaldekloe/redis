@@ -61,6 +61,22 @@ func (c *Client) BytesGET(key []byte) (value []byte, err error) {
 	return c.commandBulk(r)
 }
 
+// MGET executes <https://redis.io/commands/mget>.
+// The return is nil if key does not exist.
+func (c *Client) MGET(keys ...string) (values [][]byte, err error) {
+	r := newRequestSize(len(keys)+1, "\r\n$4\r\nMGET")
+	r.addStringList(keys)
+	return c.commandArray(r)
+}
+
+// BytesMGET executes <https://redis.io/commands/mget>.
+// The return is nil if key does not exist.
+func (c *Client) BytesMGET(keys ...[]byte) (values [][]byte, err error) {
+	r := newRequestSize(len(keys)+1, "\r\n$4\r\nMGET")
+	r.addBytesList(keys)
+	return c.commandArray(r)
+}
+
 // SET executes <https://redis.io/commands/set>.
 func (c *Client) SET(key string, value []byte) error {
 	r := newRequest("*3\r\n$3\r\nSET\r\n$")
@@ -79,6 +95,27 @@ func (c *Client) BytesSET(key, value []byte) error {
 func (c *Client) SETString(key, value string) error {
 	r := newRequest("*3\r\n$3\r\nSET\r\n$")
 	r.addStringString(key, value)
+	return c.commandOK(r)
+}
+
+// MSET executes <https://redis.io/commands/mset>.
+func (c *Client) MSET(keys []string, values [][]byte) error {
+	r := newRequestSize(len(keys)*2+1, "\r\n$4\r\nMSET")
+	r.addStringBytesMapLists(keys, values)
+	return c.commandOK(r)
+}
+
+// BytesMSET executes <https://redis.io/commands/mset>.
+func (c *Client) BytesMSET(keys, values [][]byte) error {
+	r := newRequestSize(len(keys)*2+1, "\r\n$4\r\nMSET")
+	r.addBytesBytesMapLists(keys, values)
+	return c.commandOK(r)
+}
+
+// MSETString executes <https://redis.io/commands/mset>.
+func (c *Client) MSETString(keys, values []string) error {
+	r := newRequestSize(len(keys)*2+1, "\r\n$4\r\nMSET")
+	r.addStringStringMapLists(keys, values)
 	return c.commandOK(r)
 }
 

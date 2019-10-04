@@ -115,6 +115,57 @@ func TestBytesKeyCRUD(t *testing.T) {
 	}
 }
 
+func TestBatchKeyCRUD(t *testing.T) {
+	t.Parallel()
+	key1, key2 := randomKey("test-key"), randomKey("test-key")
+	value1, value2, value3 := []byte("one"), []byte(""), []byte("x")
+
+	if err := testClient.MSET([]string{key1, key2}, [][]byte{value1, value2}); err != nil {
+		t.Fatalf("MSET %q %q %q %q error: %s", key1, value1, key2, value2, err)
+	}
+	if err := testClient.MSETString([]string{key1}, []string{string(value3)}); err != nil {
+		t.Fatalf("MSET %q %q error: %s", key1, value3, err)
+	}
+
+	absentKey := "doesn't exist"
+
+	if values, err := testClient.MGET(key1, key2, absentKey); err != nil {
+		t.Errorf("MGET %q %q %q error: %s", key1, key2, absentKey, err)
+	} else if want := [][]byte{value3, value2, nil}; !reflect.DeepEqual(values, want) {
+		t.Errorf(`MGET %q %q %q got %q, want %q`, key1, key2, absentKey, values, want)
+	}
+
+	if n, err := testClient.DELArgs(key1, key2, absentKey); err != nil {
+		t.Errorf("DEL %q %q %q error: %s", key1, key2, absentKey, err)
+	} else if n != 2 {
+		t.Errorf("DEL %q %q %q got %d, want 2", key1, key2, absentKey, n)
+	}
+}
+
+func TestBatchBytesKeyCRD(t *testing.T) {
+	t.Parallel()
+	key1, key2 := []byte(randomKey("test-key")), []byte(randomKey("test-key"))
+	value1, value2 := []byte("one"), []byte("")
+
+	if err := testClient.BytesMSET([][]byte{key1, key2}, [][]byte{value1, value2}); err != nil {
+		t.Fatalf("MSET %q %q %q %q error: %s", key1, value1, key2, value2, err)
+	}
+
+	absentKey := []byte("doesn't exist")
+
+	if values, err := testClient.BytesMGET(key1, key2, absentKey); err != nil {
+		t.Errorf("MGET %q %q %q error: %s", key1, key2, absentKey, err)
+	} else if want := [][]byte{value1, value2, nil}; !reflect.DeepEqual(values, want) {
+		t.Errorf(`MGET %q %q %q got %q, want %q`, key1, key2, absentKey, values, want)
+	}
+
+	if n, err := testClient.BytesDELArgs(key1, key2, absentKey); err != nil {
+		t.Errorf("DEL %q %q %q error: %s", key1, key2, absentKey, err)
+	} else if n != 2 {
+		t.Errorf("DEL %q %q %q got %d, want 2", key1, key2, absentKey, n)
+	}
+}
+
 func TestKeyAbsent(t *testing.T) {
 	t.Parallel()
 	const key = "doesn't exist"
