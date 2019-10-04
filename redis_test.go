@@ -74,8 +74,7 @@ func TestClose(t *testing.T) {
 		t.Fatal("close got error:", err)
 	}
 
-	err := c.SET(randomKey("test"), nil)
-	if err != ErrClosed {
+	if _, err := c.GET("arbitrary"); err != ErrClosed {
 		t.Errorf("command got error %q, want %q", err, ErrClosed)
 	}
 
@@ -126,23 +125,35 @@ func TestCloseBussy(t *testing.T) {
 
 func TestUnavailable(t *testing.T) {
 	t.Parallel()
-	c := NewClient("doesnotexist.example.com:70", 100*time.Millisecond, 100*time.Millisecond)
-	defer func() {
-		c.Close()
 
-		err := c.SET(randomKey("test"), nil)
-		if err != ErrClosed {
-			t.Errorf("got error %q, want %q", err, ErrClosed)
+	connectTimeout := 100 * time.Millisecond
+
+	c := NewClient("doesnotexist.example.com:70", 0, connectTimeout)
+	defer func() {
+		if err := c.Close(); err != nil {
+			t.Error("close got error:", err)
+		}
+
+		if _, err := c.GET("arbitrary"); err != ErrClosed {
+			t.Errorf("command after close got error %q, want %q", err, ErrClosed)
 		}
 	}()
 
-	err := c.SET(randomKey("test"), nil)
-	var e *net.OpError
-	if !errors.As(err, &e) {
-		t.Fatalf("got error %v, want a net.OpError", err)
-	}
-	if e.Op != "dial" {
+	_, err := c.GET("arbitrary")
+	if e := new(net.OpError); !errors.As(err, &e) {
+		t.Errorf("got error %v, want a net.OpError", err)
+	} else if e.Op != "dial" {
 		t.Errorf(`got error for opperation %q, want "dial"`, e.Op)
+	}
+
+	// let the Client retry…
+	time.Sleep(2 * connectTimeout)
+
+	_, err = c.GET("arbitrary")
+	if e := new(net.OpError); !errors.As(err, &e) {
+		t.Errorf("after connect retry, got error %v, want a net.OpError", err)
+	} else if e.Op != "dial" {
+		t.Errorf(`after connect retry, got error for opperation %q, want "dial"`, e.Op)
 	}
 }
 
