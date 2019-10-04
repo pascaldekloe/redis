@@ -30,11 +30,12 @@ const (
 	// minus a 32 byte TCP header (with timestamps).
 	conservativeMSS = 1208
 
-	// Number of pending requests per network protocol.
+	// Number of pending requests limit per network protocol.
 	queueSizeTCP  = 128
 	queueSizeUnix = 512
 
-	reconnectDelay = 500 * time.Microsecond
+	// Idle period after a failed network connect attempt.
+	reconnectDelay = 100 * time.Millisecond
 )
 
 // ErrClosed rejects execution after Client.Close.
@@ -117,7 +118,7 @@ func normalizeAddr(s string) string {
 	return net.JoinHostPort(host, port)
 }
 
-// Client provides command execution for a Redis service.
+// Client provides command execution on a Redis service endpoint.
 // Multiple goroutines may invoke methods on a Client simultaneously.
 type Client struct {
 	// Normalized server address in use. This field is read-only.
@@ -134,18 +135,18 @@ type Client struct {
 
 	// The buffering reader from redisConn is used as a read lock.
 	// Command submission holds the write lock [connSem] when sending
-	// to the response queue.
+	// to readQueue.
 	readQueue chan chan<- *bufio.Reader
 
 	// The read routine stops on receive: no more readQueue receives
-	// nor network use.
+	// nor network use. The idle state is not set/restored.
 	readInterrupt chan struct{}
 }
 
-// NewClient launches a managed connection to a server address.
+// NewClient launches a managed connection to a service address.
 // The host defaults to localhost, and the port defaults to 6379.
 // Thus, the emtpy string defaults to "localhost:6379". Use an
-// absolute file path (e.g. "/var/run/redis.sock") to use Unix
+// absolute file path (e.g. "/var/run/redis.sock") for Unix
 // domain sockets.
 //
 // A command timeout limits the execution duration when nonzero. Expiry causes a
@@ -189,10 +190,11 @@ type redisConn struct {
 
 // Close stops command submission with ErrClosed.
 // All pending commands are dealt with on return.
+// Calling Close more than once has no effect.
 func (c *Client) Close() error {
 	conn := <-c.connSem
 	if conn.offline == ErrClosed {
-		// redundant invokation
+		// redundant invocation
 		c.connSem <- conn // restore
 		return nil
 	}
