@@ -7,6 +7,13 @@
 
 The implementation utilises a single network connection with asynchronous I/O.
 Connection multiplexing causes overhead and higher latencies for all commands.
+Request and response I/O is executed from the routines that called the client.
+There is no internal error reporting/logging by design.
+
+* type-safe API
+* synchronous appearance
+* low-memory footprint
+* high throughput
 
 This is free and unencumbered software released into the
 [public domain](https://creativecommons.org/publicdomain/zero/1.0).
@@ -21,7 +28,8 @@ var Redis = redis.NewClient("localhost", time.Second, timeSecond)
 func demo() {
 	newLen, err := Redis.RPUSHString("demo_list", "foo")
 	if err != nil {
-		return err // complete description in place
+		log.Print("demo_list update error: ", err)
+		return
 	}
 	log.Printf("demo_list has %d elements now", newLen)
 }
