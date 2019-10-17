@@ -177,6 +177,34 @@ func (c *Client) BytesINCRBY(key []byte, increment int64) (newValue int64, err e
 	return c.commandInteger(r)
 }
 
+// STRLEN executes <https://redis.io/commands/strlen>.
+func (c *Client) STRLEN(key string) (int64, error) {
+	r := newRequest("*2\r\n$6\r\nSTRLEN\r\n$")
+	r.addString(key)
+	return c.commandInteger(r)
+}
+
+// BytesSTRLEN executes <https://redis.io/commands/strlen>.
+func (c *Client) BytesSTRLEN(key []byte) (int64, error) {
+	r := newRequest("*2\r\n$6\r\nSTRLEN\r\n$")
+	r.addBytes(key)
+	return c.commandInteger(r)
+}
+
+// GETRANGE executes <https://redis.io/commands/getrange>.
+func (c *Client) GETRANGE(key string, start, end int64) ([]byte, error) {
+	r := newRequest("*4\r\n$8\r\nGETRANGE\r\n$")
+	r.addStringIntInt(key, start, end)
+	return c.commandBulk(r)
+}
+
+// BytesGETRANGE executes <https://redis.io/commands/getrange>.
+func (c *Client) BytesGETRANGE(key []byte, start, end int64) ([]byte, error) {
+	r := newRequest("*4\r\n$8\r\nGETRANGE\r\n$")
+	r.addBytesIntInt(key, start, end)
+	return c.commandBulk(r)
+}
+
 // APPEND executes <https://redis.io/commands/append>.
 func (c *Client) APPEND(key string, value []byte) (newLen int64, err error) {
 	r := newRequest("*3\r\n$6\r\nAPPEND\r\n$")

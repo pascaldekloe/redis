@@ -214,7 +214,7 @@ func TestKeyModification(t *testing.T) {
 		t.Errorf("INCRBY %q 1000000000 got %d, want 1000000002", key, n)
 	}
 	if n, err := testClient.BytesINCRBY([]byte(key), -1e9); err != nil {
-		t.Errorf("INCRBY %q 1000000000 error: %s", key, err)
+		t.Errorf("INCRBY %q -1000000000 error: %s", key, err)
 	} else if n != 2 {
 		t.Errorf("INCRBY %q -1000000000 got %d, want 2", key, n)
 	}
@@ -233,6 +233,47 @@ func TestKeyModification(t *testing.T) {
 		t.Errorf(`APPEND %q "c" error: %s`, key, err)
 	} else if newLen != 4 {
 		t.Errorf(`APPEND %q "c" got %d, want 4`, key, newLen)
+	}
+}
+
+func TestStrings(t *testing.T) {
+	t.Parallel()
+	key := randomKey("test")
+
+	if err := testClient.SETString(key, "abc"); err != nil {
+		t.Errorf("INCR %q error: %s", key, err)
+	}
+
+	if l, err := testClient.STRLEN(key); err != nil {
+		t.Errorf("STRLEN %q error: %s", key, err)
+	} else if l != 3 {
+		t.Errorf("STRLEN %q got %d, want 3", key, l)
+	}
+	if bytes, err := testClient.GETRANGE(key, 2, 3); err != nil {
+		t.Errorf("GETRANGE %q 2 3 error: %s", key, err)
+	} else if string(bytes) != "c" {
+		t.Errorf(`GETRANGE %q 2 3 got %q, want "c"`, key, bytes)
+	}
+	if bytes, err := testClient.GETRANGE(key, -3, -2); err != nil {
+		t.Errorf("GETRANGE %q -3 -2 error: %s", key, err)
+	} else if string(bytes) != "ab" {
+		t.Errorf(`GETRANGE %q -3 -2 got %q, want "ab"`, key, bytes)
+	}
+}
+
+func TestStringsAbsent(t *testing.T) {
+	t.Parallel()
+	key := []byte("does not exist")
+
+	if l, err := testClient.BytesSTRLEN(key); err != nil {
+		t.Errorf("STRLEN %q error: %s", key, err)
+	} else if l != 0 {
+		t.Errorf("STRLEN %q got %d, want 0", key, l)
+	}
+	if bytes, err := testClient.BytesGETRANGE(key, 2, 3); err != nil {
+		t.Errorf("GETRANGE %q 2 3 error: %s", key, err)
+	} else if bytes == nil || len(bytes) != 0 {
+		t.Errorf(`GETRANGE %q 2 3 got %q, want ""`, key, bytes)
 	}
 }
 
