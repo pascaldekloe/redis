@@ -162,13 +162,19 @@ func TestWriteError(t *testing.T) {
 	timeout := time.After(time.Second)
 	select {
 	case conn := <-testClient.connSem:
-		conn.Close()
+		if conn.Conn != nil {
+			conn.Close()
+		}
 
 		select {
 		case testClient.connSem <- conn:
 			break
 		case <-timeout:
 			t.Fatal("connection sempahore release timeout")
+		}
+
+		if conn.Conn == nil {
+			t.Fatal("no connection")
 		}
 	case <-timeout:
 		t.Fatal("connection sempahore aquire timeout")
