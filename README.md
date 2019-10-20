@@ -5,15 +5,15 @@
 
 … a Redis client for the Go programming language.
 
-The implementation utilises a single network connection with asynchronous I/O.
-Connection multiplexing causes overhead and higher latencies for all commands.
-Request and response I/O is executed from the routines that called the client.
-There is no internal error reporting/logging by design.
-
 * type-safe API
 * synchronous appearance
 * low-memory footprint
 * high throughput
+
+The implementation utilises a single network connection with asynchronous I/O.
+Connection multiplexing causes overhead and higher latencies for all commands.
+Request and response I/O is executed from the routines that called the client.
+There is no internal error reporting/logging by design.
 
 This is free and unencumbered software released into the
 [public domain](https://creativecommons.org/publicdomain/zero/1.0).
@@ -38,7 +38,7 @@ func demo() {
 
 ## Performance
 
-A local Unix domain socket connection is roughly twice as fast than TCP.
+A local Unix domain socket connection is roughly twice as fast as TCP.
 The following results were measured on a E5-1650 v2 (from the year 2013).
 
 ```

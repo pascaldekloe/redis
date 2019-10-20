@@ -38,7 +38,7 @@ const (
 	reconnectDelay = 100 * time.Millisecond
 )
 
-// ErrClosed rejects execution after Client.Close.
+// ErrClosed rejects command execution after Client.Close.
 var ErrClosed = errors.New("redis: client closed")
 
 // ErrConnLost signals connection loss to response queue.
@@ -47,7 +47,7 @@ var errConnLost = errors.New("redis: connection lost while awaiting response")
 // ErrProtocol signals invalid RESP reception.
 var errProtocol = errors.New("redis: protocol violation")
 
-// ErrNull represents the null response.
+// ErrNull represents the null bulk reply.
 var errNull = errors.New("redis: null")
 
 // ServerError is a message send by the server.
@@ -118,7 +118,7 @@ func normalizeAddr(s string) string {
 	return net.JoinHostPort(host, port)
 }
 
-// Client provides command execution on a Redis service endpoint.
+// Client provides command execution on a Redis endpoint.
 // Multiple goroutines may invoke methods on a Client simultaneously.
 type Client struct {
 	// Normalized server address in use. This field is read-only.
@@ -152,9 +152,9 @@ type Client struct {
 // A command timeout limits the execution duration when nonzero. Expiry causes a
 // reconnect (to prevent stale connections) and a net.Error with Timeout() true.
 // The connect timeout limits the duration for connection establishment. Command
-// submission blocks on the first attempt. A zero connectTimeout defaults to one
-// second. When connection establishment fails, then command submission receives
-// the error of the last attempt, until the connection restores.
+// submission blocks on the first attempt. When connection establishment fails,
+// then command submission receives the error of the last attempt, until the
+// connection restores. A zero connectTimeout defaults to one second.
 func NewClient(addr string, commandTimeout, connectTimeout time.Duration) *Client {
 	addr = normalizeAddr(addr)
 	if connectTimeout == 0 {
