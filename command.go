@@ -1,5 +1,17 @@
 package redis
 
+// Option Codes
+const (
+	// Sets the specified expire time, in seconds.
+	EX = "EX"
+	// Sets the specified expire time, in milliseconds.
+	PX = "PX"
+	// Only set the key if it does not already exist.
+	NX = "NX"
+	// Only set the key if it does already exist.
+	XX = "XX"
+)
+
 // SELECT executes <https://redis.io/commands/select>.
 func (c *Client) SELECT(db int64) error {
 	r := newRequest("*2\r\n$6\r\nSELECT\r\n$")
@@ -96,6 +108,45 @@ func (c *Client) SETString(key, value string) error {
 	r := newRequest("*3\r\n$3\r\nSET\r\n$")
 	r.addStringString(key, value)
 	return c.commandOK(r)
+}
+
+// SETArgs executes <https://redis.io/commands/set>.
+// The return is false if the SET operation was not performed due to an NX or XX
+// condition.
+func (c *Client) SETArgs(key string, value []byte, options ...string) (bool, error) {
+	r := newRequestSize(3+len(options), "\r\n$3\r\nSET\r\n$")
+	r.addStringBytesStringList(key, value, options)
+	err := c.commandOK(r)
+	if err == errNull {
+		return false, nil
+	}
+	return err == nil, err
+}
+
+// BytesSETArgs executes <https://redis.io/commands/set>.
+// The return is false if the SET operation was not performed due to an NX or XX
+// condition.
+func (c *Client) BytesSETArgs(key, value []byte, options ...string) (bool, error) {
+	r := newRequestSize(3+len(options), "\r\n$3\r\nSET\r\n$")
+	r.addBytesBytesStringList(key, value, options)
+	err := c.commandOK(r)
+	if err == errNull {
+		return false, nil
+	}
+	return err == nil, err
+}
+
+// SETArgsString executes <https://redis.io/commands/set>.
+// The return is false if the SET operation was not performed due to an NX or XX
+// condition.
+func (c *Client) SETArgsString(key, value string, options ...string) (bool, error) {
+	r := newRequestSize(3+len(options), "\r\n$3\r\nSET\r\n$")
+	r.addStringStringStringList(key, value, options)
+	err := c.commandOK(r)
+	if err == errNull {
+		return false, nil
+	}
+	return err == nil, err
 }
 
 // MSET executes <https://redis.io/commands/mset>.

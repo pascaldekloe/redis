@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"reflect"
 	"testing"
+	"time"
 )
 
 func TestDBSwitch(t *testing.T) {
@@ -233,6 +234,31 @@ func TestKeyModification(t *testing.T) {
 		t.Errorf(`APPEND %q "c" error: %s`, key, err)
 	} else if newLen != 4 {
 		t.Errorf(`APPEND %q "c" got %d, want 4`, key, newLen)
+	}
+}
+
+func TestKeyOptions(t *testing.T) {
+	t.Parallel()
+	key := randomKey("test")
+
+	if ok, err := testClient.BytesSETArgs([]byte(key), nil, "XX"); err != nil {
+		t.Fatalf(`SET %q "" XX error: %s`, key, err)
+	} else if ok {
+		t.Fatalf(`SET %q "" XX got true`, key)
+	}
+
+	if ok, err := testClient.SETArgs(key, nil, "PX", "1"); err != nil {
+		t.Fatalf(`SET %q "" PX 1 error: %s`, key, err)
+	} else if !ok {
+		t.Fatalf(`SET %q "" PX 1 got false`, key)
+	}
+
+	time.Sleep(20 * time.Millisecond)
+
+	if ok, err := testClient.SETArgsString(key, "value", "NX"); err != nil {
+		t.Errorf(`SET %q "value" "NX" error: %s`, key, err)
+	} else if !ok {
+		t.Errorf(`SET %q "value" "NX" got false`, key)
 	}
 }
 

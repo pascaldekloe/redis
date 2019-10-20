@@ -350,6 +350,23 @@ func (r *request) addBytesBytesBytes(a1, a2, a3 []byte) {
 	r.buf = append(r.buf, '\r', '\n')
 }
 
+func (r *request) addBytesBytesStringList(a1, a2 []byte, a3 []string) {
+	r.buf = strconv.AppendUint(r.buf, uint64(len(a1)), 10)
+	r.buf = append(r.buf, '\r', '\n')
+	r.buf = append(r.buf, a1...)
+	r.buf = append(r.buf, '\r', '\n', '$')
+	r.buf = strconv.AppendUint(r.buf, uint64(len(a2)), 10)
+	r.buf = append(r.buf, '\r', '\n')
+	r.buf = append(r.buf, a2...)
+	for _, s := range a3 {
+		r.buf = append(r.buf, '\r', '\n', '$')
+		r.buf = strconv.AppendUint(r.buf, uint64(len(s)), 10)
+		r.buf = append(r.buf, '\r', '\n')
+		r.buf = append(r.buf, s...)
+	}
+	r.buf = append(r.buf, '\r', '\n')
+}
+
 func (r *request) addBytesBytesBytesMapLists(a1 []byte, a2, a3 [][]byte) error {
 	if len(a2) != len(a3) {
 		return errMapSlices
@@ -399,6 +416,23 @@ func (r *request) addBytesIntInt(a1 []byte, a2, a3 int64) {
 
 	r.decimal(a3)
 
+	r.buf = append(r.buf, '\r', '\n')
+}
+
+func (r *request) addStringBytesStringList(a1 string, a2 []byte, a3 []string) {
+	r.buf = strconv.AppendUint(r.buf, uint64(len(a1)), 10)
+	r.buf = append(r.buf, '\r', '\n')
+	r.buf = append(r.buf, a1...)
+	r.buf = append(r.buf, '\r', '\n', '$')
+	r.buf = strconv.AppendUint(r.buf, uint64(len(a2)), 10)
+	r.buf = append(r.buf, '\r', '\n')
+	r.buf = append(r.buf, a2...)
+	for _, s := range a3 {
+		r.buf = append(r.buf, '\r', '\n', '$')
+		r.buf = strconv.AppendUint(r.buf, uint64(len(s)), 10)
+		r.buf = append(r.buf, '\r', '\n')
+		r.buf = append(r.buf, s...)
+	}
 	r.buf = append(r.buf, '\r', '\n')
 }
 
@@ -474,6 +508,23 @@ func (r *request) addStringStringString(a1, a2, a3 string) {
 	r.buf = strconv.AppendUint(r.buf, uint64(len(a3)), 10)
 	r.buf = append(r.buf, '\r', '\n')
 	r.buf = append(r.buf, a3...)
+	r.buf = append(r.buf, '\r', '\n')
+}
+
+func (r *request) addStringStringStringList(a1, a2 string, a3 []string) {
+	r.buf = strconv.AppendUint(r.buf, uint64(len(a1)), 10)
+	r.buf = append(r.buf, '\r', '\n')
+	r.buf = append(r.buf, a1...)
+	r.buf = append(r.buf, '\r', '\n', '$')
+	r.buf = strconv.AppendUint(r.buf, uint64(len(a2)), 10)
+	r.buf = append(r.buf, '\r', '\n')
+	r.buf = append(r.buf, a2...)
+	for _, s := range a3 {
+		r.buf = append(r.buf, '\r', '\n', '$')
+		r.buf = strconv.AppendUint(r.buf, uint64(len(s)), 10)
+		r.buf = append(r.buf, '\r', '\n')
+		r.buf = append(r.buf, s...)
+	}
 	r.buf = append(r.buf, '\r', '\n')
 }
 
