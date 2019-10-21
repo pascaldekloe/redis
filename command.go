@@ -110,10 +110,10 @@ func (c *Client) SETString(key, value string) error {
 	return c.commandOK(r)
 }
 
-// SETArgs executes <https://redis.io/commands/set>.
+// SETWithArgs executes <https://redis.io/commands/set>.
 // The return is false if the SET operation was not performed due to an NX or XX
 // condition.
-func (c *Client) SETArgs(key string, value []byte, options ...string) (bool, error) {
+func (c *Client) SETWithArgs(key string, value []byte, options ...string) (bool, error) {
 	r := newRequestSize(3+len(options), "\r\n$3\r\nSET\r\n$")
 	r.addStringBytesStringList(key, value, options)
 	err := c.commandOK(r)
@@ -123,10 +123,10 @@ func (c *Client) SETArgs(key string, value []byte, options ...string) (bool, err
 	return err == nil, err
 }
 
-// BytesSETArgs executes <https://redis.io/commands/set>.
+// BytesSETWithArgs executes <https://redis.io/commands/set>.
 // The return is false if the SET operation was not performed due to an NX or XX
 // condition.
-func (c *Client) BytesSETArgs(key, value []byte, options ...string) (bool, error) {
+func (c *Client) BytesSETWithArgs(key, value []byte, options ...string) (bool, error) {
 	r := newRequestSize(3+len(options), "\r\n$3\r\nSET\r\n$")
 	r.addBytesBytesStringList(key, value, options)
 	err := c.commandOK(r)
@@ -136,10 +136,10 @@ func (c *Client) BytesSETArgs(key, value []byte, options ...string) (bool, error
 	return err == nil, err
 }
 
-// SETArgsString executes <https://redis.io/commands/set>.
+// SETWithArgsString executes <https://redis.io/commands/set>.
 // The return is false if the SET operation was not performed due to an NX or XX
 // condition.
-func (c *Client) SETArgsString(key, value string, options ...string) (bool, error) {
+func (c *Client) SETWithArgsString(key, value string, options ...string) (bool, error) {
 	r := newRequestSize(3+len(options), "\r\n$3\r\nSET\r\n$")
 	r.addStringStringStringList(key, value, options)
 	err := c.commandOK(r)

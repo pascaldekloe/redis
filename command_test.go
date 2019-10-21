@@ -241,13 +241,13 @@ func TestKeyOptions(t *testing.T) {
 	t.Parallel()
 	key := randomKey("test")
 
-	if ok, err := testClient.BytesSETArgs([]byte(key), nil, "XX"); err != nil {
+	if ok, err := testClient.BytesSETWithArgs([]byte(key), nil, "XX"); err != nil {
 		t.Fatalf(`SET %q "" XX error: %s`, key, err)
 	} else if ok {
 		t.Fatalf(`SET %q "" XX got true`, key)
 	}
 
-	if ok, err := testClient.SETArgs(key, nil, "PX", "1"); err != nil {
+	if ok, err := testClient.SETWithArgs(key, nil, "PX", "1"); err != nil {
 		t.Fatalf(`SET %q "" PX 1 error: %s`, key, err)
 	} else if !ok {
 		t.Fatalf(`SET %q "" PX 1 got false`, key)
@@ -255,7 +255,7 @@ func TestKeyOptions(t *testing.T) {
 
 	time.Sleep(20 * time.Millisecond)
 
-	if ok, err := testClient.SETArgsString(key, "value", "NX"); err != nil {
+	if ok, err := testClient.SETWithArgsString(key, "value", "NX"); err != nil {
 		t.Errorf(`SET %q "value" "NX" error: %s`, key, err)
 	} else if !ok {
 		t.Errorf(`SET %q "value" "NX" got false`, key)

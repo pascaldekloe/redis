@@ -8,14 +8,14 @@ import (
 )
 
 // SET With Options
-func ExampleClient_SETArgs() {
+func ExampleClient_SETWithArgs() {
 	// connection setup
 	var Redis = redis.NewClient("rds1.example.com", 5*time.Millisecond, time.Second)
 	// terminate after example
 	defer Redis.Close()
 
 	// execute command
-	ok, err := Redis.SETArgs("hello", nil, redis.EX, "60", redis.NX)
+	ok, err := Redis.SETWithArgs("hello", nil, redis.EX, "60", redis.NX)
 	if err != nil {
 		log.Print("error: ", err)
 		return
