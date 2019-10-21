@@ -137,10 +137,10 @@ func (c *Client) BytesSETWithArgs(key, value []byte, options ...string) (bool, e
 	return err == nil, err
 }
 
-// SETWithArgsString executes <https://redis.io/commands/set> with options.
+// SETStringWithArgs executes <https://redis.io/commands/set> with options.
 // The return is false if the SET operation was not performed due to an NX or XX
 // condition. See EX, PX, NX and XX for details.
-func (c *Client) SETWithArgsString(key, value string, options ...string) (bool, error) {
+func (c *Client) SETStringWithArgs(key, value string, options ...string) (bool, error) {
 	r := newRequestSize(3+len(options), "\r\n$3\r\nSET\r\n$")
 	r.addStringStringStringList(key, value, options)
 	err := c.commandOK(r)

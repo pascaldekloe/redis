@@ -255,7 +255,7 @@ func TestKeyOptions(t *testing.T) {
 
 	time.Sleep(20 * time.Millisecond)
 
-	if ok, err := testClient.SETWithArgsString(key, "value", "NX"); err != nil {
+	if ok, err := testClient.SETStringWithArgs(key, "value", "NX"); err != nil {
 		t.Errorf(`SET %q "value" "NX" error: %s`, key, err)
 	} else if !ok {
 		t.Errorf(`SET %q "value" "NX" got false`, key)
