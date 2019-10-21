@@ -1,14 +1,15 @@
 package redis
 
-// Option Codes
+// Option Codes For SETWithArgs
 const (
-	// Sets the specified expire time, in seconds.
+	// EX sets the specified expire time, in seconds.
 	EX = "EX"
-	// Sets the specified expire time, in milliseconds.
+	// PX sets the specified expire time, in milliseconds.
 	PX = "PX"
-	// Only set the key if it does not already exist.
+
+	// NX only sets the key if it does not already exist.
 	NX = "NX"
-	// Only set the key if it does already exist.
+	// XX only sets the key if it does already exist.
 	XX = "XX"
 )
 
@@ -110,9 +111,9 @@ func (c *Client) SETString(key, value string) error {
 	return c.commandOK(r)
 }
 
-// SETWithArgs executes <https://redis.io/commands/set>.
+// SETWithArgs executes <https://redis.io/commands/set> with options.
 // The return is false if the SET operation was not performed due to an NX or XX
-// condition.
+// condition. See EX, PX, NX and XX for details.
 func (c *Client) SETWithArgs(key string, value []byte, options ...string) (bool, error) {
 	r := newRequestSize(3+len(options), "\r\n$3\r\nSET\r\n$")
 	r.addStringBytesStringList(key, value, options)
@@ -123,9 +124,9 @@ func (c *Client) SETWithArgs(key string, value []byte, options ...string) (bool,
 	return err == nil, err
 }
 
-// BytesSETWithArgs executes <https://redis.io/commands/set>.
+// BytesSETWithArgs executes <https://redis.io/commands/set> with options.
 // The return is false if the SET operation was not performed due to an NX or XX
-// condition.
+// condition. See EX, PX, NX and XX for details.
 func (c *Client) BytesSETWithArgs(key, value []byte, options ...string) (bool, error) {
 	r := newRequestSize(3+len(options), "\r\n$3\r\nSET\r\n$")
 	r.addBytesBytesStringList(key, value, options)
@@ -136,9 +137,9 @@ func (c *Client) BytesSETWithArgs(key, value []byte, options ...string) (bool, e
 	return err == nil, err
 }
 
-// SETWithArgsString executes <https://redis.io/commands/set>.
+// SETWithArgsString executes <https://redis.io/commands/set> with options.
 // The return is false if the SET operation was not performed due to an NX or XX
-// condition.
+// condition. See EX, PX, NX and XX for details.
 func (c *Client) SETWithArgsString(key, value string, options ...string) (bool, error) {
 	r := newRequestSize(3+len(options), "\r\n$3\r\nSET\r\n$")
 	r.addStringStringStringList(key, value, options)

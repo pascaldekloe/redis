@@ -14,12 +14,15 @@ import (
 
 // Server Limits
 const (
+	// SizeMax is the upper boundary for byte sizes.
 	// A string value can be at most 512 MiB in length.
 	SizeMax = 512 << 20
 
+	// KeyMax is the upper boundary for key counts.
 	// Redis can handle up to 2³² keys.
 	KeyMax = 1 << 32
 
+	// ElementMax is the upper boundary for element counts.
 	// Every hash, list, set, and sorted set, can hold 2³² − 1 elements.
 	ElementMax = 1<<32 - 1
 )
