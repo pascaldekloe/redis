@@ -1,6 +1,5 @@
-// Package redis provides Redis service access. The implementation utilises a
-// single network connection. Client applies asynchronous I/O to optimize
-// concurrent workflows. See <https://redis.io/topics/pipelining> for details.
+// Package redis provides access to Redis nodes.
+// See <https://redis.io/topics/introduction> for the concept.
 package redis
 
 import (
@@ -53,7 +52,7 @@ var errProtocol = errors.New("redis: protocol violation")
 // ErrNull represents the null bulk reply.
 var errNull = errors.New("redis: null")
 
-// ServerError is a message send by the server.
+// ServerError is a command response from Redis.
 type ServerError string
 
 // Error honors the error interface.
@@ -121,10 +120,13 @@ func normalizeAddr(s string) string {
 	return net.JoinHostPort(host, port)
 }
 
-// Client provides command execution on a Redis endpoint.
-// Multiple goroutines may invoke methods on a Client simultaneously.
+// Client manages a connection to a Redis node until Close. Broken connection
+// states cause automated reconnects.
+//
+// Multiple goroutines may invoke methods on a Client simultaneously. Command
+// invocation applies <https://redis.io/topics/pipelining> on concurrency.
 type Client struct {
-	// Normalized server address in use. This field is read-only.
+	// Normalized service address in use. This field is read-only.
 	Addr string
 
 	// network establishment expiry
@@ -156,7 +158,7 @@ type Client struct {
 // reconnect (to prevent stale connections) and a net.Error with Timeout() true.
 // The connect timeout limits the duration for connection establishment. Command
 // submission blocks on the first attempt. When connection establishment fails,
-// then command submission receives the error of the last attempt, until the
+// then command submissions receive the error of the last attempt, until the
 // connection restores. A zero connectTimeout defaults to one second.
 func NewClient(addr string, commandTimeout, connectTimeout time.Duration) *Client {
 	addr = normalizeAddr(addr)

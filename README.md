@@ -3,16 +3,17 @@
 
 ## About
 
-… a Redis client for the Go programming language.
+… a [Redis](https://redis.io/topics/introduction) client for the Go programming
+language.
 
-* type-safe API
-* synchronous appearance
-* low-memory footprint
-* high throughput
+* Boring API with full type-safety
+* Automatic [pipelining](https://redis.io/topics/pipelining) on concurrency
+* High throughput dispite low footprint
+* Efficient OS and network utilization
+* Robust error recovery
 
-The implementation utilises a single network connection with asynchronous I/O.
-Connection multiplexing causes overhead and higher latencies for all commands.
-Request and response I/O is executed from the routines that called the client.
+Network I/O is executed in the same goroutine that invoked the 
+[Client](https://godoc.org/github.com/pascaldekloe/redis#Client).
 There is no internal error reporting/logging by design.
 
 This is free and unencumbered software released into the
@@ -23,7 +24,7 @@ This is free and unencumbered software released into the
 
 ```go
 // Redis is a thread-safe client.
-var Redis = redis.NewClient("localhost", time.Second, timeSecond)
+var Redis = redis.NewClient("localhost", time.Second, time.Second)
 
 func demo() {
 	newLen, err := Redis.RPUSHString("demo_list", "foo")
@@ -31,14 +32,14 @@ func demo() {
 		log.Print("demo_list update error: ", err)
 		return
 	}
-	log.Printf("demo_list has %d elements now", newLen)
+	log.Printf("demo_list has %d elements", newLen)
 }
 ```
 
 
 ## Performance
 
-A local Unix domain socket connection is roughly twice as fast as TCP.
+Unix domain sockets are roughly twice as fast as TCP.
 The following results were measured on a E5-1650 v2 (from the year 2013).
 
 ```
