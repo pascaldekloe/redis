@@ -177,7 +177,7 @@ func TestWriteError(t *testing.T) {
 			t.Fatal("no connection")
 		}
 	case <-timeout:
-		t.Fatal("connection sempahore aquire timeout")
+		t.Fatal("connection sempahore acquire timeout")
 	}
 
 	_, err := testClient.DEL("key")
@@ -210,7 +210,7 @@ func TestReadError(t *testing.T) {
 			t.Fatal("connection sempahore release timeout")
 		}
 	case <-timeout:
-		t.Fatal("connection sempahore aquire timeout")
+		t.Fatal("connection sempahore acquire timeout")
 	}
 
 	_, err := testClient.DEL("key")
@@ -327,7 +327,7 @@ func BenchmarkBulkString(b *testing.B) {
 		}
 	}()
 
-	for _, size := range []int{1, 144, 20_736} {
+	for _, size := range []int{1, 144, 20736} {
 		b.Run(fmt.Sprintf("%dB", size), func(b *testing.B) {
 			if err := benchClient.SET(key, make([]byte, size)); err != nil {
 				b.Fatal("population error:", err)

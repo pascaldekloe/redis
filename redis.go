@@ -150,7 +150,7 @@ type Client struct {
 
 // NewClient launches a managed connection to a service address.
 // The host defaults to localhost, and the port defaults to 6379.
-// Thus, the emtpy string defaults to "localhost:6379". Use an
+// Thus, the empty string defaults to "localhost:6379". Use an
 // absolute file path (e.g. "/var/run/redis.sock") for Unix
 // domain sockets.
 //
@@ -187,7 +187,7 @@ func NewClient(addr string, commandTimeout, connectTimeout time.Duration) *Clien
 
 type redisConn struct {
 	net.Conn       // nil when offline
-	offline  error // reason for connection absense
+	offline  error // reason for connection absence
 
 	// The token is nil when a read routine is using it.
 	idle *bufio.Reader

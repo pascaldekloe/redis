@@ -1,5 +1,6 @@
 [![API Documentation](https://godoc.org/github.com/pascaldekloe/redis?status.svg)](https://godoc.org/github.com/pascaldekloe/redis)
 [![Build Status](https://circleci.com/gh/pascaldekloe/redis.svg?style=svg)](https://circleci.com/gh/pascaldekloe/redis)
+[![Code Report](https://goreportcard.com/badge/github.com/pascaldekloe/redis)](https://goreportcard.com/report/github.com/pascaldekloe/redis)
 
 ## About
 

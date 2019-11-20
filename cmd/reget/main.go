@@ -13,12 +13,14 @@ var (
 	rawFlag  = flag.Bool("raw", false, "Prints the value as is, instead of a quoted string plus line feed.")
 )
 
+// Redis manages the connection.
 var Redis *redis.Client
 
 func main() {
 	flag.Parse()
 
 	Redis = redis.NewClient(*addrFlag, 0, 0)
+	defer Redis.Close()
 
 	print(flag.Args())
 }
