@@ -9,8 +9,8 @@ language.
 
 * Boring API with full type-safety
 * Automatic [pipelining](https://redis.io/topics/pipelining) on concurrency
-* High throughput dispite low footprint
-* Efficient OS and network utilization
+* High throughput despite low footprint
+* Efficient OS and network utilisation
 * Robust error recovery
 
 Network I/O is executed in the same goroutine that invoked the 
