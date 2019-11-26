@@ -5,130 +5,196 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"sync"
 )
 
 // ErrMapSlices rejects execution due to a broken mapping.
 var errMapSlices = errors.New("redis: number of keys doesn't match number of values")
 
-func decodeOK(r *bufio.Reader) (userErr, fatalErr error) {
-	line, err := readCRLF(r)
+func decodeOK(r *bufio.Reader) error {
+	line, err := readLF(r)
 	switch {
 	case err != nil:
-		return nil, err
+		return err
 	case len(line) < 3:
-		return nil, fmt.Errorf("%w; received empty line %q", errProtocol, line)
-	case line[0] == '-':
-		return ServerError(line[1 : len(line)-2]), nil
+		return fmt.Errorf("%w; received empty line %q", errProtocol, line)
 	case line[0] == '+' && line[1] == 'O' && line[2] == 'K':
-		return nil, nil
+		return nil
 	case line[0] == '$' && line[1] == '-' && line[2] == '1':
-		return errNull, nil
+		return errNull
+	case line[0] == '-':
+		return ServerError(line[1 : len(line)-2])
 	}
-	return nil, fmt.Errorf("%w; want OK simple string, received %.40q", errProtocol, line)
+	return fmt.Errorf("%w; want OK simple string, received %.40q", errProtocol, line)
 }
 
-func decodeInteger(r *bufio.Reader) (integer int64, userErr, fatalErr error) {
-	line, err := readCRLF(r)
+func decodeInteger(r *bufio.Reader) (int64, error) {
+	line, err := readLF(r)
 	switch {
 	case err != nil:
-		return 0, nil, err
+		return 0, err
 	case len(line) < 3:
-		return 0, nil, fmt.Errorf("%w; received empty line %q", errProtocol, line)
+		return 0, fmt.Errorf("%w; received empty line %q", errProtocol, line)
+	case line[0] == ':':
+		return ParseInt(line[1 : len(line)-2]), nil
 	case line[0] == '-':
-		return 0, ServerError(line[1 : len(line)-2]), nil
-	case line[0] != ':':
-		return 0, nil, fmt.Errorf("%w; want an integer, received %.40q", errProtocol, line)
+		return 0, ServerError(line[1 : len(line)-2])
 	}
-	return ParseInt(line[1 : len(line)-2]), nil, nil
+	return 0, fmt.Errorf("%w; want an integer, received %.40q", errProtocol, line)
 }
 
-func decodeBulk(r *bufio.Reader) (bulk []byte, userErr, fatalErr error) {
-	line, err := readCRLF(r)
-	switch {
-	case err != nil:
-		return nil, nil, err
-	case len(line) < 3:
-		return nil, nil, fmt.Errorf("%w; received empty line %q", errProtocol, line)
-	case line[0] == '-':
-		return nil, ServerError(line[1 : len(line)-2]), nil
-	case line[0] != '$':
-		return nil, nil, fmt.Errorf("%w; want a bulk string, received %.40q", errProtocol, line)
+func decodeBulkBytes(r *bufio.Reader) ([]byte, error) {
+	size, err := readBulkSize(r)
+	if size < 0 {
+		return nil, err
 	}
-	err = readBulk(r, &bulk, line)
-	return bulk, nil, err
-}
+	bulk := make([]byte, size)
 
-func decodeArray(r *bufio.Reader) (array [][]byte, userErr, fatalErr error) {
-	line, err := readCRLF(r)
-	switch {
-	case err != nil:
-		return nil, nil, err
-	case len(line) < 3:
-		return nil, nil, fmt.Errorf("%w; received empty line %q", errProtocol, line)
-	case line[0] == '-':
-		return nil, ServerError(line[1 : len(line)-2]), nil
-	case line[0] != '*':
-		return nil, nil, fmt.Errorf("%w; want an array, received %.40q", errProtocol, line)
-	}
-
-	// negative means null–zero must be non-nil
-	if size := ParseInt(line[1 : len(line)-2]); size >= 0 {
-		array = make([][]byte, size)
-	}
-	for i := range array {
-		line, err := readCRLF(r)
+	// read payload
+	if size > 0 {
+		done, err := r.Read(bulk)
+		for done < len(bulk) && err == nil {
+			var more int
+			more, err = r.Read(bulk[done:])
+			done += more
+		}
 		if err != nil {
-			return nil, nil, err
-		}
-		if len(line) < 3 || line[0] != '$' {
-			return nil, nil, fmt.Errorf("%w; array element %d received %q", errProtocol, i, line)
-		}
-		err = readBulk(r, &array[i], line)
-		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 	}
-	return array, nil, nil
+
+	// skip CRLF
+	_, err = r.Discard(2)
+	return bulk, err
 }
 
-// WARNING: line stays only valid until the next read on r.
-func readCRLF(r *bufio.Reader) (line []byte, err error) {
+func decodeBulkString(r *bufio.Reader) (string, bool, error) {
+	size, err := readBulkSize(r)
+	if size < 0 {
+		return "", false, err
+	}
+
+	n := int(size)
+	bufSize := r.Size()
+	if n <= bufSize {
+		slice, err := r.Peek(n)
+		if err != nil {
+			return "", false, err
+		}
+		s := string(slice)
+		_, err = r.Discard(n + 2)
+		return s, true, err
+	}
+
+	var bulk strings.Builder
+	bulk.Grow(n)
+	for {
+		slice, err := r.Peek(bufSize)
+		if err != nil {
+			return "", false, err
+		}
+		bulk.Write(slice)
+		r.Discard(bufSize) // guaranteed to succeed
+
+		n = bulk.Cap() - bulk.Len()
+		if n <= bufSize {
+			break
+		}
+	}
+
+	slice, err := r.Peek(n)
+	if err != nil {
+		return "", false, err
+	}
+	bulk.Write(slice)
+	_, err = r.Discard(n + 2) // skip CRLF
+	return bulk.String(), true, err
+}
+
+func decodeBytesArray(r *bufio.Reader) ([][]byte, error) {
+	size, err := readArraySize(r)
+	if size < 0 {
+		return nil, err
+	}
+	array := make([][]byte, 0, size)
+
+	for len(array) < cap(array) {
+		bytes, err := decodeBulkBytes(r)
+		if err != nil {
+			return nil, err
+		}
+		array = append(array, bytes)
+	}
+	return array, nil
+}
+
+func decodeStringArray(r *bufio.Reader) ([]string, error) {
+	size, err := readArraySize(r)
+	if size < 0 {
+		return nil, err
+	}
+	array := make([]string, 0, size)
+
+	for len(array) < cap(array) {
+		s, _, err := decodeBulkString(r)
+		if err != nil {
+			return nil, err
+		}
+		array = append(array, s)
+	}
+	return array, nil
+}
+
+func readLF(r *bufio.Reader) (line []byte, err error) {
 	line, err = r.ReadSlice('\n')
 	if err != nil {
 		if err == bufio.ErrBufferFull {
-			err = fmt.Errorf("%w; CRLF exceeds %d bytes: %.40q…", errProtocol, r.Size(), line)
+			err = fmt.Errorf("%w; LF exceeds %d bytes: %.40q…", errProtocol, r.Size(), line)
 		}
 		return nil, err
 	}
 	return line, nil
 }
 
-func readBulk(r *bufio.Reader, dest *[]byte, line []byte) error {
-	if len(line) < 3 {
-		return fmt.Errorf("%w; received empty line: %q", errProtocol, line)
-	}
-	size := ParseInt(line[1 : len(line)-2])
-	if size < 0 {
-		return nil
-	}
-
-	*dest = make([]byte, size)
-	if size != 0 {
-		done, err := r.Read(*dest)
-		for done < len(*dest) && err == nil {
-			var more int
-			more, err = r.Read((*dest)[done:])
-			done += more
+// Errors cause a negative size (for null).
+func readBulkSize(r *bufio.Reader) (int64, error) {
+	line, err := readLF(r)
+	switch {
+	case err != nil:
+		return -1, err
+	case len(line) < 3:
+		return -1, fmt.Errorf("%w; received empty line %q", errProtocol, line)
+	case line[0] == '$':
+		size := ParseInt(line[1 : len(line)-2])
+		if size > SizeMax {
+			return -1, fmt.Errorf("redis: bluk receive with %d bytes", size)
 		}
-		if err != nil {
-			*dest = nil
-			return err
-		}
+		return size, nil
+	case line[0] == '-':
+		return -1, ServerError(line[1 : len(line)-2])
 	}
+	return -1, fmt.Errorf("%w; want a bulk string, received %.40q", errProtocol, line)
+}
 
-	_, err := r.Discard(2) // skip CRLF
-	return err
+// Errors cause a negative size (for null).
+func readArraySize(r *bufio.Reader) (int64, error) {
+	line, err := readLF(r)
+	switch {
+	case err != nil:
+		return -1, err
+	case len(line) < 3:
+		return -1, fmt.Errorf("%w; received empty line %q", errProtocol, line)
+	case line[0] == '*':
+		size := ParseInt(line[1 : len(line)-2])
+		if size > ElementMax {
+			return -1, fmt.Errorf("redis: array receive with %d elements", size)
+		}
+		return size, nil
+	case line[0] == '-':
+		return -1, ServerError(line[1 : len(line)-2])
+	}
+	return -1, fmt.Errorf("%w; want an array, received %.40q", errProtocol, line)
 }
 
 type request struct {

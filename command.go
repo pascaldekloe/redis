@@ -63,7 +63,15 @@ func (c *Client) FLUSHALL(async bool) error {
 func (c *Client) GET(key string) (value []byte, err error) {
 	r := newRequest("*2\r\n$3\r\nGET\r\n$")
 	r.addString(key)
-	return c.commandBulk(r)
+	return c.commandBulkBytes(r)
+}
+
+// GETString executes <https://redis.io/commands/get>.
+// Boolean ok is false if key does not exist.
+func (c *Client) GETString(key string) (value string, ok bool, err error) {
+	r := newRequest("*2\r\n$3\r\nGET\r\n$")
+	r.addString(key)
+	return c.commandBulkString(r)
 }
 
 // BytesGET executes <https://redis.io/commands/get>.
@@ -71,7 +79,7 @@ func (c *Client) GET(key string) (value []byte, err error) {
 func (c *Client) BytesGET(key []byte) (value []byte, err error) {
 	r := newRequest("*2\r\n$3\r\nGET\r\n$")
 	r.addBytes(key)
-	return c.commandBulk(r)
+	return c.commandBulkBytes(r)
 }
 
 // MGET executes <https://redis.io/commands/mget>.
@@ -79,7 +87,15 @@ func (c *Client) BytesGET(key []byte) (value []byte, err error) {
 func (c *Client) MGET(keys ...string) (values [][]byte, err error) {
 	r := newRequestSize(len(keys)+1, "\r\n$4\r\nMGET")
 	r.addStringList(keys)
-	return c.commandArray(r)
+	return c.commandBytesArray(r)
+}
+
+// MGETString executes <https://redis.io/commands/mget>.
+// The return is nil if key does not exist.
+func (c *Client) MGETString(keys ...string) (values []string, err error) {
+	r := newRequestSize(len(keys)+1, "\r\n$4\r\nMGET")
+	r.addStringList(keys)
+	return c.commandStringArray(r)
 }
 
 // BytesMGET executes <https://redis.io/commands/mget>.
@@ -87,7 +103,7 @@ func (c *Client) MGET(keys ...string) (values [][]byte, err error) {
 func (c *Client) BytesMGET(keys ...[]byte) (values [][]byte, err error) {
 	r := newRequestSize(len(keys)+1, "\r\n$4\r\nMGET")
 	r.addBytesList(keys)
-	return c.commandArray(r)
+	return c.commandBytesArray(r)
 }
 
 // SET executes <https://redis.io/commands/set>.
@@ -247,14 +263,22 @@ func (c *Client) BytesSTRLEN(key []byte) (int64, error) {
 func (c *Client) GETRANGE(key string, start, end int64) ([]byte, error) {
 	r := newRequest("*4\r\n$8\r\nGETRANGE\r\n$")
 	r.addStringIntInt(key, start, end)
-	return c.commandBulk(r)
+	return c.commandBulkBytes(r)
+}
+
+// GETRANGEString executes <https://redis.io/commands/getrange>.
+func (c *Client) GETRANGEString(key string, start, end int64) (string, error) {
+	r := newRequest("*4\r\n$8\r\nGETRANGE\r\n$")
+	r.addStringIntInt(key, start, end)
+	s, _, err := c.commandBulkString(r)
+	return s, err
 }
 
 // BytesGETRANGE executes <https://redis.io/commands/getrange>.
 func (c *Client) BytesGETRANGE(key []byte, start, end int64) ([]byte, error) {
 	r := newRequest("*4\r\n$8\r\nGETRANGE\r\n$")
 	r.addBytesIntInt(key, start, end)
-	return c.commandBulk(r)
+	return c.commandBulkBytes(r)
 }
 
 // APPEND executes <https://redis.io/commands/append>.
@@ -300,7 +324,16 @@ func (c *Client) BytesLLEN(key []byte) (int64, error) {
 func (c *Client) LINDEX(key string, index int64) (value []byte, err error) {
 	r := newRequest("*3\r\n$6\r\nLINDEX\r\n$")
 	r.addStringInt(key, index)
-	return c.commandBulk(r)
+	return c.commandBulkBytes(r)
+}
+
+// LINDEXString executes <https://redis.io/commands/lindex>.
+// Boolean ok is false if key does not exist.
+// Boolean ok is false if index is out of range.
+func (c *Client) LINDEXString(key string, index int64) (value string, ok bool, err error) {
+	r := newRequest("*3\r\n$6\r\nLINDEX\r\n$")
+	r.addStringInt(key, index)
+	return c.commandBulkString(r)
 }
 
 // BytesLINDEX executes <https://redis.io/commands/lindex>.
@@ -309,7 +342,7 @@ func (c *Client) LINDEX(key string, index int64) (value []byte, err error) {
 func (c *Client) BytesLINDEX(key []byte, index int64) (value []byte, err error) {
 	r := newRequest("*3\r\n$6\r\nLINDEX\r\n$")
 	r.addBytesInt(key, index)
-	return c.commandBulk(r)
+	return c.commandBulkBytes(r)
 }
 
 // LRANGE executes <https://redis.io/commands/lrange>.
@@ -317,7 +350,15 @@ func (c *Client) BytesLINDEX(key []byte, index int64) (value []byte, err error) 
 func (c *Client) LRANGE(key string, start, stop int64) (values [][]byte, err error) {
 	r := newRequest("*4\r\n$6\r\nLRANGE\r\n$")
 	r.addStringIntInt(key, start, stop)
-	return c.commandArray(r)
+	return c.commandBytesArray(r)
+}
+
+// LRANGEString executes <https://redis.io/commands/lrange>.
+// The return is empty if key does not exist.
+func (c *Client) LRANGEString(key string, start, stop int64) (values []string, err error) {
+	r := newRequest("*4\r\n$6\r\nLRANGE\r\n$")
+	r.addStringIntInt(key, start, stop)
+	return c.commandStringArray(r)
 }
 
 // BytesLRANGE executes <https://redis.io/commands/lrange>.
@@ -325,7 +366,7 @@ func (c *Client) LRANGE(key string, start, stop int64) (values [][]byte, err err
 func (c *Client) BytesLRANGE(key []byte, start, stop int64) (values [][]byte, err error) {
 	r := newRequest("*4\r\n$6\r\nLRANGE\r\n$")
 	r.addBytesIntInt(key, start, stop)
-	return c.commandArray(r)
+	return c.commandBytesArray(r)
 }
 
 // LPOP executes <https://redis.io/commands/lpop>.
@@ -333,7 +374,15 @@ func (c *Client) BytesLRANGE(key []byte, start, stop int64) (values [][]byte, er
 func (c *Client) LPOP(key string) (value []byte, err error) {
 	r := newRequest("*2\r\n$4\r\nLPOP\r\n$")
 	r.addString(key)
-	return c.commandBulk(r)
+	return c.commandBulkBytes(r)
+}
+
+// LPOPString executes <https://redis.io/commands/lpop>.
+// Boolean ok is false if key does not exist.
+func (c *Client) LPOPString(key string) (value string, ok bool, err error) {
+	r := newRequest("*2\r\n$4\r\nLPOP\r\n$")
+	r.addString(key)
+	return c.commandBulkString(r)
 }
 
 // BytesLPOP executes <https://redis.io/commands/lpop>.
@@ -341,7 +390,7 @@ func (c *Client) LPOP(key string) (value []byte, err error) {
 func (c *Client) BytesLPOP(key []byte) (value []byte, err error) {
 	r := newRequest("*2\r\n$4\r\nLPOP\r\n$")
 	r.addBytes(key)
-	return c.commandBulk(r)
+	return c.commandBulkBytes(r)
 }
 
 // RPOP executes <https://redis.io/commands/rpop>.
@@ -349,7 +398,15 @@ func (c *Client) BytesLPOP(key []byte) (value []byte, err error) {
 func (c *Client) RPOP(key string) (value []byte, err error) {
 	r := newRequest("*2\r\n$4\r\nRPOP\r\n$")
 	r.addString(key)
-	return c.commandBulk(r)
+	return c.commandBulkBytes(r)
+}
+
+// RPOPString executes <https://redis.io/commands/rpop>.
+// Boolean ok is false if key does not exist.
+func (c *Client) RPOPString(key string) (value string, ok bool, err error) {
+	r := newRequest("*2\r\n$4\r\nRPOP\r\n$")
+	r.addString(key)
+	return c.commandBulkString(r)
 }
 
 // BytesRPOP executes <https://redis.io/commands/rpop>.
@@ -357,7 +414,7 @@ func (c *Client) RPOP(key string) (value []byte, err error) {
 func (c *Client) BytesRPOP(key []byte) (value []byte, err error) {
 	r := newRequest("*2\r\n$4\r\nRPOP\r\n$")
 	r.addBytes(key)
-	return c.commandBulk(r)
+	return c.commandBulkBytes(r)
 }
 
 // LTRIM executes <https://redis.io/commands/ltrim>.
@@ -442,7 +499,15 @@ func (c *Client) RPUSHString(key, value string) (newLen int64, err error) {
 func (c *Client) HGET(key, field string) (value []byte, err error) {
 	r := newRequest("*3\r\n$4\r\nHGET\r\n$")
 	r.addStringString(key, field)
-	return c.commandBulk(r)
+	return c.commandBulkBytes(r)
+}
+
+// HGETString executes <https://redis.io/commands/hget>.
+// Boolean ok is false if key does not exist.
+func (c *Client) HGETString(key, field string) (value string, ok bool, err error) {
+	r := newRequest("*3\r\n$4\r\nHGET\r\n$")
+	r.addStringString(key, field)
+	return c.commandBulkString(r)
 }
 
 // BytesHGET executes <https://redis.io/commands/hget>.
@@ -450,7 +515,7 @@ func (c *Client) HGET(key, field string) (value []byte, err error) {
 func (c *Client) BytesHGET(key, field []byte) (value []byte, err error) {
 	r := newRequest("*3\r\n$4\r\nHGET\r\n$")
 	r.addBytesBytes(key, field)
-	return c.commandBulk(r)
+	return c.commandBulkBytes(r)
 }
 
 // HSET executes <https://redis.io/commands/hset>.
@@ -508,17 +573,27 @@ func (c *Client) BytesHDELArgs(key []byte, fields ...[]byte) (int64, error) {
 }
 
 // HMGET executes <https://redis.io/commands/hmget>.
+// For every field that does not exist, a nil value is returned.
 func (c *Client) HMGET(key string, fields ...string) (values [][]byte, err error) {
 	r := newRequestSize(2+len(fields), "\r\n$5\r\nHMGET\r\n$")
 	r.addStringStringList(key, fields)
-	return c.commandArray(r)
+	return c.commandBytesArray(r)
+}
+
+// HMGETString executes <https://redis.io/commands/hmget>.
+// For every field that does not exist, an empty string is returned.
+func (c *Client) HMGETString(key string, fields ...string) (values []string, err error) {
+	r := newRequestSize(2+len(fields), "\r\n$5\r\nHMGET\r\n$")
+	r.addStringStringList(key, fields)
+	return c.commandStringArray(r)
 }
 
 // BytesHMGET executes <https://redis.io/commands/hmget>.
+// For every field that does not exist, a nil value is returned.
 func (c *Client) BytesHMGET(key []byte, fields ...[]byte) (values [][]byte, err error) {
 	r := newRequestSize(2+len(fields), "\r\n$5\r\nHMGET\r\n$")
 	r.addBytesBytesList(key, fields)
-	return c.commandArray(r)
+	return c.commandBytesArray(r)
 }
 
 // BytesHMSET executes <https://redis.io/commands/hmset>.

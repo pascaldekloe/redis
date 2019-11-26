@@ -319,13 +319,32 @@ func BenchmarkInteger(b *testing.B) {
 	})
 }
 
-func BenchmarkBulkString(b *testing.B) {
+func BenchmarkBulk(b *testing.B) {
 	key := randomKey("bench")
 	defer func() {
 		if _, err := benchClient.DEL(key); err != nil {
 			b.Error("cleanup error:", err)
 		}
 	}()
+
+	getBytes := func(b *testing.B, size int) {
+		bytes, err := benchClient.GET(key)
+		if err != nil {
+			b.Fatal("error:", err)
+		}
+		if len(bytes) != size {
+			b.Fatalf("got %d bytes, want %d", len(bytes), size)
+		}
+	}
+	getString := func(b *testing.B, size int) {
+		s, _, err := benchClient.GETString(key)
+		if err != nil {
+			b.Fatal("error:", err)
+		}
+		if len(s) != size {
+			b.Fatalf("got %d bytes, want %d", len(s), size)
+		}
+	}
 
 	for _, size := range []int{1, 144, 20736} {
 		b.Run(fmt.Sprintf("%dB", size), func(b *testing.B) {
@@ -334,27 +353,32 @@ func BenchmarkBulkString(b *testing.B) {
 			}
 
 			b.Run("sequential", func(b *testing.B) {
-				for i := 0; i < b.N; i++ {
-					bytes, err := benchClient.GET(key)
-					if err != nil {
-						b.Fatal("error:", err)
+				b.Run("bytes", func(b *testing.B) {
+					for i := 0; i < b.N; i++ {
+						getBytes(b, size)
 					}
-					if len(bytes) != size {
-						b.Fatalf("got %d bytes, want %d", len(bytes), size)
+				})
+				b.Run("string", func(b *testing.B) {
+					for i := 0; i < b.N; i++ {
+						getString(b, size)
 					}
-				}
+				})
 			})
+
 			b.Run("parallel", func(b *testing.B) {
-				b.RunParallel(func(pb *testing.PB) {
-					for pb.Next() {
-						bytes, err := benchClient.GET(key)
-						if err != nil {
-							b.Fatal("error:", err)
+				b.Run("bytes", func(b *testing.B) {
+					b.RunParallel(func(pb *testing.PB) {
+						for pb.Next() {
+							getBytes(b, size)
 						}
-						if len(bytes) != size {
-							b.Fatalf("got %d bytes, want %d", len(bytes), size)
+					})
+				})
+				b.Run("string", func(b *testing.B) {
+					b.RunParallel(func(pb *testing.PB) {
+						for pb.Next() {
+							getString(b, size)
 						}
-					}
+					})
 				})
 			})
 		})
@@ -369,6 +393,25 @@ func BenchmarkArray(b *testing.B) {
 		}
 	}()
 
+	getBytes := func(b *testing.B, size int64) {
+		values, err := benchClient.LRANGE(key, 0, size-1)
+		if err != nil {
+			b.Fatal("error:", err)
+		}
+		if int64(len(values)) != size {
+			b.Fatalf("got %d values", len(values))
+		}
+	}
+	getString := func(b *testing.B, size int64) {
+		values, err := benchClient.LRANGEString(key, 0, size-1)
+		if err != nil {
+			b.Fatal("error:", err)
+		}
+		if int64(len(values)) != size {
+			b.Fatalf("got %d values", len(values))
+		}
+	}
+
 	for _, size := range []int64{1, 12, 144} {
 		b.Run(fmt.Sprintf("%d×8B", size), func(b *testing.B) {
 			for {
@@ -382,27 +425,32 @@ func BenchmarkArray(b *testing.B) {
 			}
 
 			b.Run("sequential", func(b *testing.B) {
-				for i := 0; i < b.N; i++ {
-					values, err := benchClient.LRANGE(key, 0, size-1)
-					if err != nil {
-						b.Fatal("error:", err)
+				b.Run("bytes", func(b *testing.B) {
+					for i := 0; i < b.N; i++ {
+						getBytes(b, size)
 					}
-					if int64(len(values)) != size {
-						b.Fatalf("got %d values", len(values))
+				})
+				b.Run("string", func(b *testing.B) {
+					for i := 0; i < b.N; i++ {
+						getString(b, size)
 					}
-				}
+				})
 			})
+
 			b.Run("parallel", func(b *testing.B) {
-				b.RunParallel(func(pb *testing.PB) {
-					for pb.Next() {
-						values, err := benchClient.LRANGE(key, 0, size-1)
-						if err != nil {
-							b.Fatal("error:", err)
+				b.Run("bytes", func(b *testing.B) {
+					b.RunParallel(func(pb *testing.PB) {
+						for pb.Next() {
+							getBytes(b, size)
 						}
-						if int64(len(values)) != size {
-							b.Fatalf("got %d values", len(values))
+					})
+				})
+				b.Run("string", func(b *testing.B) {
+					b.RunParallel(func(pb *testing.PB) {
+						for pb.Next() {
+							getString(b, size)
 						}
-					}
+					})
 				})
 			})
 		})

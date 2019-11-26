@@ -344,13 +344,9 @@ func (c *Client) commandOK(req *request) error {
 	if err != nil {
 		return err
 	}
-	userErr, err := decodeOK(r)
-	if err != nil {
-		c.onReceiveError()
-		return err
-	}
-	c.pass(r)
-	return userErr
+	err = decodeOK(r)
+	c.pass(r, err)
+	return err
 }
 
 func (c *Client) commandInteger(req *request) (int64, error) {
@@ -358,46 +354,64 @@ func (c *Client) commandInteger(req *request) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	integer, userErr, err := decodeInteger(r)
-	if err != nil {
-		c.onReceiveError()
-		return 0, err
-	}
-	c.pass(r)
-	return integer, userErr
+	integer, err := decodeInteger(r)
+	c.pass(r, err)
+	return integer, err
 }
 
-func (c *Client) commandBulk(req *request) ([]byte, error) {
+func (c *Client) commandBulkBytes(req *request) ([]byte, error) {
 	r, err := c.submit(req)
 	if err != nil {
 		return nil, err
 	}
-	bulk, userErr, err := decodeBulk(r)
-	if err != nil {
-		c.onReceiveError()
-		return nil, err
-	}
-	c.pass(r)
-	return bulk, userErr
+	bytes, err := decodeBulkBytes(r)
+	c.pass(r, err)
+	return bytes, err
 }
 
-func (c *Client) commandArray(req *request) ([][]byte, error) {
+func (c *Client) commandBulkString(req *request) (string, bool, error) {
+	r, err := c.submit(req)
+	if err != nil {
+		return "", false, err
+	}
+	s, ok, err := decodeBulkString(r)
+	c.pass(r, err)
+	return s, ok, err
+}
+
+func (c *Client) commandBytesArray(req *request) ([][]byte, error) {
 	r, err := c.submit(req)
 	if err != nil {
 		return nil, err
 	}
-	array, userErr, err := decodeArray(r)
+	array, err := decodeBytesArray(r)
+	c.pass(r, err)
+	return array, err
+}
+
+func (c *Client) commandStringArray(req *request) ([]string, error) {
+	r, err := c.submit(req)
 	if err != nil {
-		c.onReceiveError()
 		return nil, err
 	}
-	c.pass(r)
-	return array, userErr
+	array, err := decodeStringArray(r)
+	c.pass(r, err)
+	return array, err
 }
 
 // Pass over the virtual read lock to the following command in line.
 // If there are no routines waiting for response, then go in idle mode.
-func (c *Client) pass(r *bufio.Reader) {
+func (c *Client) pass(r *bufio.Reader, err error) {
+	switch err {
+	case nil, errNull:
+		break
+	default:
+		if _, ok := err.(ServerError); !ok {
+			c.onReceiveError()
+			return
+		}
+	}
+
 	// The high-traffic scenario has the optimal flow.
 	select {
 	case next := <-c.readQueue:
