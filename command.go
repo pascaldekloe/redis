@@ -133,7 +133,7 @@ func (c *Client) BytesGET(key []byte) (value []byte, err error) {
 }
 
 // MGET executes <https://redis.io/commands/mget>.
-// The return is nil if key does not exist.
+// For every key that does not exist, a nil value is returned.
 func (c *Client) MGET(keys ...string) (values [][]byte, err error) {
 	r := newRequestSize(len(keys)+1, "\r\n$4\r\nMGET")
 	r.addStringList(keys)
@@ -141,7 +141,7 @@ func (c *Client) MGET(keys ...string) (values [][]byte, err error) {
 }
 
 // MGETString executes <https://redis.io/commands/mget>.
-// The return is nil if key does not exist.
+// For every key that does not exist, an empty string is returned.
 func (c *Client) MGETString(keys ...string) (values []string, err error) {
 	r := newRequestSize(len(keys)+1, "\r\n$4\r\nMGET")
 	r.addStringList(keys)
@@ -149,7 +149,7 @@ func (c *Client) MGETString(keys ...string) (values []string, err error) {
 }
 
 // BytesMGET executes <https://redis.io/commands/mget>.
-// The return is nil if key does not exist.
+// For every key that does not exist, a nil value is returned.
 func (c *Client) BytesMGET(keys ...[]byte) (values [][]byte, err error) {
 	r := newRequestSize(len(keys)+1, "\r\n$4\r\nMGET")
 	r.addBytesList(keys)
