@@ -262,6 +262,39 @@ func (r *request) addBytesBytes(a1, a2 []byte) {
 	r.buf = append(r.buf, '\r', '\n')
 }
 
+func (r *request) addBytesBytesString(a1, a2 []byte, a3 string) {
+	r.bytes(a1)
+	r.buf = append(r.buf, '\r', '\n', '$')
+	r.bytes(a2)
+	r.buf = append(r.buf, '\r', '\n', '$')
+	r.string(a3)
+	r.buf = append(r.buf, '\r', '\n')
+}
+
+func (r *request) addBytesBytesStringInt(a1, a2 []byte, a3 string, a4 int64) {
+	r.bytes(a1)
+	r.buf = append(r.buf, '\r', '\n', '$')
+	r.bytes(a2)
+	r.buf = append(r.buf, '\r', '\n', '$')
+	r.string(a3)
+	r.buf = append(r.buf, '\r', '\n', '$')
+	r.decimal(a4)
+	r.buf = append(r.buf, '\r', '\n')
+}
+
+func (r *request) addBytesBytesStringStringInt(a1, a2 []byte, a3, a4 string, a5 int64) {
+	r.bytes(a1)
+	r.buf = append(r.buf, '\r', '\n', '$')
+	r.bytes(a2)
+	r.buf = append(r.buf, '\r', '\n', '$')
+	r.string(a3)
+	r.buf = append(r.buf, '\r', '\n', '$')
+	r.string(a4)
+	r.buf = append(r.buf, '\r', '\n', '$')
+	r.decimal(a5)
+	r.buf = append(r.buf, '\r', '\n')
+}
+
 func (r *request) addBytesBytesList(a1 []byte, a2 [][]byte) {
 	r.bytes(a1)
 	for _, b := range a2 {
@@ -299,6 +332,39 @@ func (r *request) addStringBytes(a1 string, a2 []byte) {
 	r.buf = append(r.buf, '\r', '\n')
 }
 
+func (r *request) addStringBytesString(a1 string, a2 []byte, a3 string) {
+	r.string(a1)
+	r.buf = append(r.buf, '\r', '\n', '$')
+	r.bytes(a2)
+	r.buf = append(r.buf, '\r', '\n', '$')
+	r.string(a3)
+	r.buf = append(r.buf, '\r', '\n')
+}
+
+func (r *request) addStringBytesStringInt(a1 string, a2 []byte, a3 string, a4 int64) {
+	r.string(a1)
+	r.buf = append(r.buf, '\r', '\n', '$')
+	r.bytes(a2)
+	r.buf = append(r.buf, '\r', '\n', '$')
+	r.string(a3)
+	r.buf = append(r.buf, '\r', '\n', '$')
+	r.decimal(a4)
+	r.buf = append(r.buf, '\r', '\n')
+}
+
+func (r *request) addStringBytesStringStringInt(a1 string, a2 []byte, a3, a4 string, a5 int64) {
+	r.string(a1)
+	r.buf = append(r.buf, '\r', '\n', '$')
+	r.bytes(a2)
+	r.buf = append(r.buf, '\r', '\n', '$')
+	r.string(a3)
+	r.buf = append(r.buf, '\r', '\n', '$')
+	r.string(a4)
+	r.buf = append(r.buf, '\r', '\n', '$')
+	r.decimal(a5)
+	r.buf = append(r.buf, '\r', '\n')
+}
+
 func (r *request) addStringBytesMapLists(a1 []string, a2 [][]byte) error {
 	if len(a1) != len(a2) {
 		return errMapSlices
@@ -324,6 +390,39 @@ func (r *request) addStringString(a1, a2 string) {
 	r.string(a1)
 	r.buf = append(r.buf, '\r', '\n', '$')
 	r.string(a2)
+	r.buf = append(r.buf, '\r', '\n')
+}
+
+func (r *request) addStringStringString(a1, a2, a3 string) {
+	r.string(a1)
+	r.buf = append(r.buf, '\r', '\n', '$')
+	r.string(a2)
+	r.buf = append(r.buf, '\r', '\n', '$')
+	r.string(a3)
+	r.buf = append(r.buf, '\r', '\n')
+}
+
+func (r *request) addStringStringStringInt(a1, a2, a3 string, a4 int64) {
+	r.string(a1)
+	r.buf = append(r.buf, '\r', '\n', '$')
+	r.string(a2)
+	r.buf = append(r.buf, '\r', '\n', '$')
+	r.string(a3)
+	r.buf = append(r.buf, '\r', '\n', '$')
+	r.decimal(a4)
+	r.buf = append(r.buf, '\r', '\n')
+}
+
+func (r *request) addStringStringStringStringInt(a1, a2, a3, a4 string, a5 int64) {
+	r.string(a1)
+	r.buf = append(r.buf, '\r', '\n', '$')
+	r.string(a2)
+	r.buf = append(r.buf, '\r', '\n', '$')
+	r.string(a3)
+	r.buf = append(r.buf, '\r', '\n', '$')
+	r.string(a4)
+	r.buf = append(r.buf, '\r', '\n', '$')
+	r.decimal(a5)
 	r.buf = append(r.buf, '\r', '\n')
 }
 
@@ -448,15 +547,6 @@ func (r *request) addStringStringBytes(a1, a2 string, a3 []byte) {
 	r.string(a2)
 	r.buf = append(r.buf, '\r', '\n', '$')
 	r.bytes(a3)
-	r.buf = append(r.buf, '\r', '\n')
-}
-
-func (r *request) addStringStringString(a1, a2, a3 string) {
-	r.string(a1)
-	r.buf = append(r.buf, '\r', '\n', '$')
-	r.string(a2)
-	r.buf = append(r.buf, '\r', '\n', '$')
-	r.string(a3)
 	r.buf = append(r.buf, '\r', '\n')
 }
 

@@ -1,17 +1,67 @@
 package redis
 
-// Option Codes For SETWithArgs
-const (
-	// EX sets the specified expire time, in seconds.
-	EX = "EX"
-	// PX sets the specified expire time, in milliseconds.
-	PX = "PX"
-
-	// NX only sets the key if it does not already exist.
-	NX = "NX"
-	// XX only sets the key if it does already exist.
-	XX = "XX"
+import (
+	"errors"
+	"fmt"
+	"time"
 )
+
+// Flags For SETOptions
+const (
+	// NX only sets the key if it does not already exist.
+	NX = 1 << iota
+	// XX only sets the key if it does already exist.
+	XX
+
+	// EX sets an expire time, in seconds.
+	EX
+	// PX sets an expire time, in milliseconds.
+	PX
+)
+
+// SETOptions are extra arguments for the SET command.
+type SETOptions struct {
+	// Composotion of NX, XX, EX or PX.
+	Flags uint
+
+	// The value is rounded to seconds with the EX flag,
+	// and milliseconds with PX. Non-zero values without
+	// expiry Flags are rejected to prevent mistakes.
+	Expire time.Duration
+}
+
+func (o *SETOptions) args() (existArg, expireArg string, expire int64, err error) {
+	if unknown := o.Flags &^ (NX | XX | EX | PX); unknown != 0 {
+		return "", "", 0, fmt.Errorf("redis: unknown flags %#x", unknown)
+	}
+
+	switch o.Flags & (NX | XX) {
+	case 0:
+		break
+	case NX:
+		existArg = "NX"
+	case XX:
+		existArg = "XX"
+	default:
+		return "", "", 0, errors.New("redis: combination of NX and XX not allowed")
+	}
+
+	switch o.Flags & (EX | PX) {
+	case 0:
+		if o.Expire != 0 {
+			return "", "", 0, errors.New("redis: expire time without EX nor PX not allowed")
+		}
+	case EX:
+		expireArg = "EX"
+		expire = int64(o.Expire / time.Second)
+	case PX:
+		expireArg = "PX"
+		expire = int64(o.Expire / time.Millisecond)
+	default:
+		return "", "", 0, errors.New("redis: combination of EX and PX not allowed")
+	}
+	return
+}
 
 // SELECT executes <https://redis.io/commands/select>.
 func (c *Client) SELECT(db int64) error {
@@ -127,39 +177,96 @@ func (c *Client) SETString(key, value string) error {
 	return c.commandOK(r)
 }
 
-// SETWithArgs executes <https://redis.io/commands/set> with options.
+// SETWithOptions executes <https://redis.io/commands/set> with options.
 // The return is false if the SET operation was not performed due to an NX or XX
-// condition. See EX, PX, NX and XX for details.
-func (c *Client) SETWithArgs(key string, value []byte, options ...string) (bool, error) {
-	r := newRequestSize(3+len(options), "\r\n$3\r\nSET\r\n$")
-	r.addStringBytesStringList(key, value, options)
-	err := c.commandOK(r)
+// condition.
+func (c *Client) SETWithOptions(key string, value []byte, o SETOptions) (bool, error) {
+	existArg, expireArg, expire, err := o.args()
+	if err != nil {
+		return false, err
+	}
+
+	var r *request
+	switch {
+	case existArg != "" && expireArg == "":
+		r = newRequest("*4\r\n$3\r\nSET\r\n$")
+		r.addStringBytesString(key, value, existArg)
+	case existArg == "" && expireArg != "":
+		r = newRequest("*5\r\n$3\r\nSET\r\n$")
+		r.addStringBytesStringInt(key, value, expireArg, expire)
+	case existArg != "" && expireArg != "":
+		r = newRequest("*6\r\n$3\r\nSET\r\n$")
+		r.addStringBytesStringStringInt(key, value, existArg, expireArg, expire)
+	default:
+		err := c.SET(key, value)
+		return err == nil, err
+	}
+
+	err = c.commandOK(r)
 	if err == errNull {
 		return false, nil
 	}
 	return err == nil, err
 }
 
-// BytesSETWithArgs executes <https://redis.io/commands/set> with options.
+// BytesSETWithOptions executes <https://redis.io/commands/set> with options.
 // The return is false if the SET operation was not performed due to an NX or XX
-// condition. See EX, PX, NX and XX for details.
-func (c *Client) BytesSETWithArgs(key, value []byte, options ...string) (bool, error) {
-	r := newRequestSize(3+len(options), "\r\n$3\r\nSET\r\n$")
-	r.addBytesBytesStringList(key, value, options)
-	err := c.commandOK(r)
+// condition.
+func (c *Client) BytesSETWithOptions(key, value []byte, o SETOptions) (bool, error) {
+	existArg, expireArg, expire, err := o.args()
+	if err != nil {
+		return false, err
+	}
+
+	var r *request
+	switch {
+	case existArg != "" && expireArg == "":
+		r = newRequest("*4\r\n$3\r\nSET\r\n$")
+		r.addBytesBytesString(key, value, existArg)
+	case existArg == "" && expireArg != "":
+		r = newRequest("*5\r\n$3\r\nSET\r\n$")
+		r.addBytesBytesStringInt(key, value, expireArg, expire)
+	case existArg != "" && expireArg != "":
+		r = newRequest("*6\r\n$3\r\nSET\r\n$")
+		r.addBytesBytesStringStringInt(key, value, existArg, expireArg, expire)
+	default:
+		err := c.BytesSET(key, value)
+		return err == nil, err
+	}
+
+	err = c.commandOK(r)
 	if err == errNull {
 		return false, nil
 	}
 	return err == nil, err
 }
 
-// SETStringWithArgs executes <https://redis.io/commands/set> with options.
+// SETStringWithOptions executes <https://redis.io/commands/set> with options.
 // The return is false if the SET operation was not performed due to an NX or XX
-// condition. See EX, PX, NX and XX for details.
-func (c *Client) SETStringWithArgs(key, value string, options ...string) (bool, error) {
-	r := newRequestSize(3+len(options), "\r\n$3\r\nSET\r\n$")
-	r.addStringStringStringList(key, value, options)
-	err := c.commandOK(r)
+// condition.
+func (c *Client) SETStringWithOptions(key, value string, o SETOptions) (bool, error) {
+	existArg, expireArg, expire, err := o.args()
+	if err != nil {
+		return false, err
+	}
+
+	var r *request
+	switch {
+	case existArg != "" && expireArg == "":
+		r = newRequest("*4\r\n$3\r\nSET\r\n$")
+		r.addStringStringString(key, value, existArg)
+	case existArg == "" && expireArg != "":
+		r = newRequest("*5\r\n$3\r\nSET\r\n$")
+		r.addStringStringStringInt(key, value, expireArg, expire)
+	case existArg != "" && expireArg != "":
+		r = newRequest("*6\r\n$3\r\nSET\r\n$")
+		r.addStringStringStringStringInt(key, value, existArg, expireArg, expire)
+	default:
+		err := c.SETString(key, value)
+		return err == nil, err
+	}
+
+	err = c.commandOK(r)
 	if err == errNull {
 		return false, nil
 	}
