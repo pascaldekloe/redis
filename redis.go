@@ -8,7 +8,9 @@ import (
 	"fmt"
 	"net"
 	"path/filepath"
-	"time"
+	"strconv"
+	"strings"
+	"sync"
 )
 
 // Server Limits
@@ -26,31 +28,31 @@ const (
 	ElementMax = 1<<32 - 1
 )
 
-// Fixed Settings
-const (
-	// IPv6 minimum MTU of 1280 bytes, minus a 40 byte IP header,
-	// minus a 32 byte TCP header (with timestamps).
-	conservativeMSS = 1208
+// conservativeMMS uses the IPv6 minimum MTU of 1280 bytes, minus a 40 byte IP
+// header, minus a 32 byte TCP header (with timestamps).
+const conservativeMSS = 1208
 
-	// Number of pending requests limit per network protocol.
-	queueSizeTCP  = 128
-	queueSizeUnix = 512
+func isUnixAddr(s string) bool {
+	return len(s) != 0 && s[0] == '/'
+}
 
-	// Idle period after a failed network connect attempt.
-	reconnectDelay = 100 * time.Millisecond
-)
+func normalizeAddr(s string) string {
+	if isUnixAddr(s) {
+		return filepath.Clean(s)
+	}
 
-// ErrClosed rejects command execution after Client.Close.
-var ErrClosed = errors.New("redis: client closed")
-
-// ErrConnLost signals connection loss to response queue.
-var errConnLost = errors.New("redis: connection lost while awaiting response")
-
-// ErrProtocol signals invalid RESP reception.
-var errProtocol = errors.New("redis: protocol violation")
-
-// ErrNull represents the null bulk reply.
-var errNull = errors.New("redis: null")
+	host, port, err := net.SplitHostPort(s)
+	if err != nil {
+		host = s
+	}
+	if host == "" {
+		host = "localhost"
+	}
+	if port == "" {
+		port = "6379"
+	}
+	return net.JoinHostPort(host, port)
+}
 
 // ServerError is a command response from Redis.
 type ServerError string
@@ -98,412 +100,627 @@ func ParseInt(bytes []byte) int64 {
 	return value
 }
 
-func isUnixAddr(s string) bool {
-	return len(s) != 0 && s[0] == '/'
-}
+// errProtocol signals invalid RESP reception.
+var errProtocol = errors.New("redis: protocol violation")
 
-func normalizeAddr(s string) string {
-	if isUnixAddr(s) {
-		return filepath.Clean(s)
-	}
+// errNull represents the null bulk reply.
+var errNull = errors.New("redis: null")
 
-	host, port, err := net.SplitHostPort(s)
-	if err != nil {
-		host = s
-	}
-	if host == "" {
-		host = "localhost"
-	}
-	if port == "" {
-		port = "6379"
-	}
-	return net.JoinHostPort(host, port)
-}
-
-// Client manages a connection to a Redis node until Close. Broken connection
-// states cause automated reconnects.
-//
-// Multiple goroutines may invoke methods on a Client simultaneously. Command
-// invocation applies <https://redis.io/topics/pipelining> on concurrency.
-type Client struct {
-	// Normalized service address in use. This field is read-only.
-	Addr string
-
-	// network establishment expiry
-	connectTimeout time.Duration
-
-	// optional execution expiry
-	commandTimeout time.Duration
-
-	// The connection semaphore is used as a write lock.
-	connSem chan *redisConn
-
-	// The buffering reader from redisConn is used as a read lock.
-	// Command submission holds the write lock [connSem] when sending
-	// to readQueue.
-	readQueue chan chan<- *bufio.Reader
-
-	// The read routine stops on receive: no more readQueue receives
-	// nor network use. The idle state is not set/restored.
-	readInterrupt chan struct{}
-}
-
-// NewClient launches a managed connection to a service address.
-// The host defaults to localhost, and the port defaults to 6379.
-// Thus, the empty string defaults to "localhost:6379". Use an
-// absolute file path (e.g. "/var/run/redis.sock") for Unix
-// domain sockets.
-//
-// A command timeout limits the execution duration when nonzero. Expiry causes a
-// reconnect (to prevent stale connections) and a net.Error with Timeout() true.
-// The connect timeout limits the duration for connection establishment. Command
-// submission blocks on the first attempt. When connection establishment fails,
-// then command submissions receive the error of the last attempt, until the
-// connection restores. A zero connectTimeout defaults to one second.
-func NewClient(addr string, commandTimeout, connectTimeout time.Duration) *Client {
-	addr = normalizeAddr(addr)
-	if connectTimeout == 0 {
-		connectTimeout = time.Second
-	}
-	queueSize := queueSizeTCP
-	if isUnixAddr(addr) {
-		queueSize = queueSizeUnix
-	}
-
-	c := &Client{
-		Addr:           addr,
-		commandTimeout: commandTimeout,
-		connectTimeout: connectTimeout,
-
-		connSem:       make(chan *redisConn, 1),
-		readQueue:     make(chan chan<- *bufio.Reader, queueSize),
-		readInterrupt: make(chan struct{}),
-	}
-
-	go c.connect()
-
-	return c
-}
-
-type redisConn struct {
-	net.Conn       // nil when offline
-	offline  error // reason for connection absence
-
-	// The token is nil when a read routine is using it.
-	idle *bufio.Reader
-}
-
-// Close stops command submission with ErrClosed.
-// All pending commands are dealt with on return.
-// Calling Close more than once has no effect.
-func (c *Client) Close() error {
-	conn := <-c.connSem
-	if conn.offline == ErrClosed {
-		// redundant invocation
-		c.connSem <- conn // restore
-		return nil
-	}
-
-	// stop command submission
-	c.connSem <- &redisConn{offline: ErrClosed}
-
-	c.haltReceive(conn)
-	c.cancelQueue()
-
-	if conn.Conn != nil {
-		return conn.Close()
-	}
-	return nil
-}
-
-// Connect populates the connection semaphore.
-func (c *Client) connect() {
-	network := "tcp"
-	if isUnixAddr(c.Addr) {
-		network = "unix"
-	}
-
-	for firstAttempt := true; ; firstAttempt = false {
-		conn, err := net.DialTimeout(network, c.Addr, c.connectTimeout)
-		if err != nil {
-			// closed loop protection:
-			retry := time.NewTimer(reconnectDelay)
-
-			if !firstAttempt {
-				// remove previous error; unless closed
-				current := <-c.connSem
-				if current.offline == ErrClosed {
-					c.connSem <- current // restore
-					return               // abandon
-				}
-			}
-
-			// propagate connection failure
-			c.connSem <- &redisConn{
-				offline: fmt.Errorf("redis: offline due %w", err),
-			}
-
-			<-retry.C
-			continue
-		}
-
-		if !firstAttempt {
-			// clear previous error; unless closed
-			current := <-c.connSem
-			if current.offline == ErrClosed {
-				c.connSem <- current // restore
-				conn.Close()         // discard
-				return               // abandon
-			}
-		}
-
-		// connection tuning
-		if tcp, ok := conn.(*net.TCPConn); ok {
-			tcp.SetNoDelay(false)
-			tcp.SetLinger(0)
-		}
-
-		// apply
-		c.connSem <- &redisConn{
-			Conn: conn,
-			idle: bufio.NewReaderSize(conn, conservativeMSS),
-		}
-		return
-	}
-}
-
-// CancelQueue signals connection loss to all pending commands.
-func (c *Client) cancelQueue() {
-	for n := len(c.readQueue); n > 0; n-- {
-		(<-c.readQueue) <- (*bufio.Reader)(nil)
-	}
-}
-
-// Submit sends a request, and deals with response ordering.
-func (c *Client) submit(req *request) (*bufio.Reader, error) {
-	// operate in write lock
-	conn := <-c.connSem
-
-	// validate connection state
-	if err := conn.offline; err != nil {
-		c.connSem <- conn // restore
-		return nil, err
-	}
-
-	// apply timeout if set
-	var deadline time.Time
-	if c.commandTimeout != 0 {
-		deadline = time.Now().Add(c.commandTimeout)
-		conn.SetWriteDeadline(deadline)
-	}
-
-	// send command
-	if _, err := conn.Write(req.buf); err != nil {
-		// write remains locked
-		go func() {
-			c.haltReceive(conn)
-			c.cancelQueue()
-			conn.Close()
-			c.connect()
-		}()
-		return nil, err
-	}
-
-	reader := conn.idle
-	if reader != nil {
-		// Own the virtual read lock by clearing the idle state.
-		conn.idle = nil
-		// The receive channel is not used, as we're next in line.
-		req.free()
-	} else {
-		// The virtual read lock is processing the queue.
-		c.readQueue <- req.receive
-	}
-
-	c.connSem <- conn // release write lock
-
-	if reader == nil {
-		// await handover of virtual read lock
-		reader = <-req.receive
-		req.free()
-		if reader == nil {
-			// queue abandonment
-			return nil, errConnLost
-		}
-	}
-
-	if !deadline.IsZero() {
-		conn.SetReadDeadline(deadline)
-	}
-
-	return reader, nil
-}
-
-func (c *Client) commandOK(req *request) error {
-	r, err := c.submit(req)
-	if err != nil {
+func decodeOK(r *bufio.Reader) error {
+	line, err := readLF(r)
+	switch {
+	case err != nil:
 		return err
+	case len(line) < 3:
+		return fmt.Errorf("%w; received empty line %q", errProtocol, line)
+	case line[0] == '+' && line[1] == 'O' && line[2] == 'K':
+		return nil
+	case line[0] == '$' && line[1] == '-' && line[2] == '1':
+		return errNull
+	case line[0] == '-':
+		return ServerError(line[1 : len(line)-2])
 	}
-	err = decodeOK(r)
-	c.pass(r, err)
-	return err
+	return fmt.Errorf("%w; want OK simple string, received %.40q", errProtocol, line)
 }
 
-func (c *Client) commandInteger(req *request) (int64, error) {
-	r, err := c.submit(req)
-	if err != nil {
+func decodeInteger(r *bufio.Reader) (int64, error) {
+	line, err := readLF(r)
+	switch {
+	case err != nil:
 		return 0, err
+	case len(line) < 3:
+		return 0, fmt.Errorf("%w; received empty line %q", errProtocol, line)
+	case line[0] == ':':
+		return ParseInt(line[1 : len(line)-2]), nil
+	case line[0] == '-':
+		return 0, ServerError(line[1 : len(line)-2])
 	}
-	integer, err := decodeInteger(r)
-	c.pass(r, err)
-	return integer, err
+	return 0, fmt.Errorf("%w; want an integer, received %.40q", errProtocol, line)
 }
 
-func (c *Client) commandBulkBytes(req *request) ([]byte, error) {
-	r, err := c.submit(req)
-	if err != nil {
+func decodeBulkBytes(r *bufio.Reader) ([]byte, error) {
+	size, err := readBulkSize(r)
+	if size < 0 {
 		return nil, err
 	}
-	bytes, err := decodeBulkBytes(r)
-	c.pass(r, err)
-	return bytes, err
+	bulk := make([]byte, size)
+
+	// read payload
+	if size > 0 {
+		done, err := r.Read(bulk)
+		for done < len(bulk) && err == nil {
+			var more int
+			more, err = r.Read(bulk[done:])
+			done += more
+		}
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	// skip CRLF
+	_, err = r.Discard(2)
+	return bulk, err
 }
 
-func (c *Client) commandBulkString(req *request) (string, bool, error) {
-	r, err := c.submit(req)
+func decodeBulkString(r *bufio.Reader) (string, bool, error) {
+	size, err := readBulkSize(r)
+	if size < 0 {
+		return "", false, err
+	}
+
+	n := int(size)
+	bufSize := r.Size()
+	if n <= bufSize {
+		slice, err := r.Peek(n)
+		if err != nil {
+			return "", false, err
+		}
+		s := string(slice)
+		_, err = r.Discard(n + 2)
+		return s, true, err
+	}
+
+	var bulk strings.Builder
+	bulk.Grow(n)
+	for {
+		slice, err := r.Peek(bufSize)
+		if err != nil {
+			return "", false, err
+		}
+		bulk.Write(slice)
+		r.Discard(bufSize) // guaranteed to succeed
+
+		n = bulk.Cap() - bulk.Len()
+		if n <= bufSize {
+			break
+		}
+	}
+
+	slice, err := r.Peek(n)
 	if err != nil {
 		return "", false, err
 	}
-	s, ok, err := decodeBulkString(r)
-	c.pass(r, err)
-	return s, ok, err
+	bulk.Write(slice)
+	_, err = r.Discard(n + 2) // skip CRLF
+	return bulk.String(), true, err
 }
 
-func (c *Client) commandBytesArray(req *request) ([][]byte, error) {
-	r, err := c.submit(req)
-	if err != nil {
+func decodeBytesArray(r *bufio.Reader) ([][]byte, error) {
+	size, err := readArraySize(r)
+	if size < 0 {
 		return nil, err
 	}
-	array, err := decodeBytesArray(r)
-	c.pass(r, err)
-	return array, err
+	array := make([][]byte, 0, size)
+
+	for len(array) < cap(array) {
+		bytes, err := decodeBulkBytes(r)
+		if err != nil {
+			return nil, err
+		}
+		array = append(array, bytes)
+	}
+	return array, nil
 }
 
-func (c *Client) commandStringArray(req *request) ([]string, error) {
-	r, err := c.submit(req)
-	if err != nil {
+func decodeStringArray(r *bufio.Reader) ([]string, error) {
+	size, err := readArraySize(r)
+	if size < 0 {
 		return nil, err
 	}
-	array, err := decodeStringArray(r)
-	c.pass(r, err)
-	return array, err
+	array := make([]string, 0, size)
+
+	for len(array) < cap(array) {
+		s, _, err := decodeBulkString(r)
+		if err != nil {
+			return nil, err
+		}
+		array = append(array, s)
+	}
+	return array, nil
 }
 
-// Pass over the virtual read lock to the following command in line.
-// If there are no routines waiting for response, then go in idle mode.
-func (c *Client) pass(r *bufio.Reader, err error) {
-	switch err {
-	case nil, errNull:
-		break
-	default:
-		if _, ok := err.(ServerError); !ok {
-			c.onReceiveError()
-			return
+func readLF(r *bufio.Reader) (line []byte, err error) {
+	line, err = r.ReadSlice('\n')
+	if err != nil {
+		if err == bufio.ErrBufferFull {
+			err = fmt.Errorf("%w; LF exceeds %d bytes: %.40q…", errProtocol, r.Size(), line)
 		}
+		return nil, err
 	}
-
-	// The high-traffic scenario has the optimal flow.
-	select {
-	case next := <-c.readQueue:
-		next <- r // pass read lock
-		return
-
-	default:
-		break
-	}
-
-	select {
-	case next := <-c.readQueue:
-		next <- r // pass read lock
-
-	// Write is locked to make the idle decision atomic,
-	// as readQueue is fed while holding the write lock.
-	case conn := <-c.connSem:
-		select {
-		case next := <-c.readQueue:
-			// lost race recovery
-			next <- r // pass read lock
-
-		default:
-			// set read lock to idle
-			conn.idle = r
-		}
-		c.connSem <- conn // unlock write
-
-	case <-c.readInterrupt:
-		// halt accepted
-		break // read lock discard
-	}
+	return line, nil
 }
 
-func (c *Client) onReceiveError() {
-	for {
-		select {
-		case <-c.readInterrupt:
-			return // accept halt
-
-		// A write (lock owner) blocks on a full queue,
-		// so include discard here to prevent deadlock.
-		case next := <-c.readQueue:
-			// signal connection loss
-			next <- (*bufio.Reader)(nil)
-
-		case conn := <-c.connSem:
-			// write locked
-			if conn.offline != nil {
-				if conn.offline == ErrClosed {
-					// confirm by accept
-					<-c.readInterrupt
-				}
-				c.connSem <- conn // restore
-			} else {
-				// write remains locked
-				go func() {
-					conn.Close()
-					c.cancelQueue()
-					c.connect()
-				}()
-			}
-
-			return
+// Errors cause a negative size (for null).
+func readBulkSize(r *bufio.Reader) (int64, error) {
+	line, err := readLF(r)
+	switch {
+	case err != nil:
+		return -1, err
+	case len(line) < 3:
+		return -1, fmt.Errorf("%w; received empty line %q", errProtocol, line)
+	case line[0] == '$':
+		size := ParseInt(line[1 : len(line)-2])
+		if size > SizeMax {
+			return -1, fmt.Errorf("redis: bluk receive with %d bytes", size)
 		}
+		return size, nil
+	case line[0] == '-':
+		return -1, ServerError(line[1 : len(line)-2])
 	}
+	return -1, fmt.Errorf("%w; want a bulk string, received %.40q", errProtocol, line)
 }
 
-func (c *Client) haltReceive(writeLock *redisConn) {
-	if writeLock.offline != nil || writeLock.idle != nil {
-		// read routine not running
-		return
-	}
-	// Read routine needs the write lock to idle.
-
-	readHandover := make(chan *bufio.Reader)
-	select {
-	case c.readInterrupt <- struct{}{}:
-		// The read routine accepted the halt,
-		// while awaiting the write lock.
-		break
-
-	case c.readQueue <- readHandover:
-		select {
-		case c.readInterrupt <- struct{}{}:
-			// The read routine accepted the halt,
-			// while awaiting the write lock.
-			break
-
-		case <-readHandover:
-			// All reads are done. We have the read lock.
-			break
+// Errors cause a negative size (for null).
+func readArraySize(r *bufio.Reader) (int64, error) {
+	line, err := readLF(r)
+	switch {
+	case err != nil:
+		return -1, err
+	case len(line) < 3:
+		return -1, fmt.Errorf("%w; received empty line %q", errProtocol, line)
+	case line[0] == '*':
+		size := ParseInt(line[1 : len(line)-2])
+		if size > ElementMax {
+			return -1, fmt.Errorf("redis: array receive with %d elements", size)
 		}
+		return size, nil
+	case line[0] == '-':
+		return -1, ServerError(line[1 : len(line)-2])
+	}
+	return -1, fmt.Errorf("%w; want an array, received %.40q", errProtocol, line)
+}
+
+// errMapSlices rejects execution due malformed invocation.
+var errMapSlices = errors.New("redis: number of keys doesn't match number of values")
+
+type request struct {
+	buf     []byte
+	receive chan *bufio.Reader
+}
+
+func (r *request) free() {
+	requestPool.Put(r)
+}
+
+var requestPool = sync.Pool{
+	New: func() interface{} {
+		return &request{
+			buf:     make([]byte, 256),
+			receive: make(chan *bufio.Reader),
+		}
+	},
+}
+
+func newRequest(prefix string) *request {
+	r := requestPool.Get().(*request)
+	r.buf = append(r.buf[:0], prefix...)
+	return r
+}
+
+func newRequestSize(n int, prefix string) *request {
+	r := requestPool.Get().(*request)
+	r.buf = append(r.buf[:0], '*')
+	r.buf = strconv.AppendUint(r.buf, uint64(n), 10)
+	r.buf = append(r.buf, prefix...)
+	return r
+}
+
+func (r *request) addBytes(a []byte) {
+	r.bytes(a)
+	r.buf = append(r.buf, '\r', '\n')
+}
+
+func (r *request) addString(a string) {
+	r.string(a)
+	r.buf = append(r.buf, '\r', '\n')
+}
+
+func (r *request) addBytesList(a [][]byte) {
+	for _, b := range a {
+		r.buf = append(r.buf, '\r', '\n', '$')
+		r.bytes(b)
+	}
+	r.buf = append(r.buf, '\r', '\n')
+}
+
+func (r *request) addStringList(a []string) {
+	for _, s := range a {
+		r.buf = append(r.buf, '\r', '\n', '$')
+		r.string(s)
+	}
+	r.buf = append(r.buf, '\r', '\n')
+}
+
+func (r *request) addBytesBytes(a1, a2 []byte) {
+	r.bytes(a1)
+	r.buf = append(r.buf, '\r', '\n', '$')
+	r.bytes(a2)
+	r.buf = append(r.buf, '\r', '\n')
+}
+
+func (r *request) addBytesBytesString(a1, a2 []byte, a3 string) {
+	r.bytes(a1)
+	r.buf = append(r.buf, '\r', '\n', '$')
+	r.bytes(a2)
+	r.buf = append(r.buf, '\r', '\n', '$')
+	r.string(a3)
+	r.buf = append(r.buf, '\r', '\n')
+}
+
+func (r *request) addBytesBytesStringInt(a1, a2 []byte, a3 string, a4 int64) {
+	r.bytes(a1)
+	r.buf = append(r.buf, '\r', '\n', '$')
+	r.bytes(a2)
+	r.buf = append(r.buf, '\r', '\n', '$')
+	r.string(a3)
+	r.buf = append(r.buf, '\r', '\n', '$')
+	r.decimal(a4)
+	r.buf = append(r.buf, '\r', '\n')
+}
+
+func (r *request) addBytesBytesStringStringInt(a1, a2 []byte, a3, a4 string, a5 int64) {
+	r.bytes(a1)
+	r.buf = append(r.buf, '\r', '\n', '$')
+	r.bytes(a2)
+	r.buf = append(r.buf, '\r', '\n', '$')
+	r.string(a3)
+	r.buf = append(r.buf, '\r', '\n', '$')
+	r.string(a4)
+	r.buf = append(r.buf, '\r', '\n', '$')
+	r.decimal(a5)
+	r.buf = append(r.buf, '\r', '\n')
+}
+
+func (r *request) addBytesBytesList(a1 []byte, a2 [][]byte) {
+	r.bytes(a1)
+	for _, b := range a2 {
+		r.buf = append(r.buf, '\r', '\n', '$')
+		r.bytes(b)
+	}
+	r.buf = append(r.buf, '\r', '\n')
+}
+
+func (r *request) addBytesBytesMapLists(a1, a2 [][]byte) error {
+	if len(a1) != len(a2) {
+		return errMapSlices
+	}
+	for i, key := range a1 {
+		r.buf = append(r.buf, '\r', '\n', '$')
+		r.bytes(key)
+		r.buf = append(r.buf, '\r', '\n', '$')
+		r.bytes(a2[i])
+	}
+	r.buf = append(r.buf, '\r', '\n')
+	return nil
+}
+
+func (r *request) addBytesInt(a1 []byte, a2 int64) {
+	r.bytes(a1)
+	r.buf = append(r.buf, '\r', '\n', '$')
+	r.decimal(a2)
+	r.buf = append(r.buf, '\r', '\n')
+}
+
+func (r *request) addStringBytes(a1 string, a2 []byte) {
+	r.string(a1)
+	r.buf = append(r.buf, '\r', '\n', '$')
+	r.bytes(a2)
+	r.buf = append(r.buf, '\r', '\n')
+}
+
+func (r *request) addStringBytesString(a1 string, a2 []byte, a3 string) {
+	r.string(a1)
+	r.buf = append(r.buf, '\r', '\n', '$')
+	r.bytes(a2)
+	r.buf = append(r.buf, '\r', '\n', '$')
+	r.string(a3)
+	r.buf = append(r.buf, '\r', '\n')
+}
+
+func (r *request) addStringBytesStringInt(a1 string, a2 []byte, a3 string, a4 int64) {
+	r.string(a1)
+	r.buf = append(r.buf, '\r', '\n', '$')
+	r.bytes(a2)
+	r.buf = append(r.buf, '\r', '\n', '$')
+	r.string(a3)
+	r.buf = append(r.buf, '\r', '\n', '$')
+	r.decimal(a4)
+	r.buf = append(r.buf, '\r', '\n')
+}
+
+func (r *request) addStringBytesStringStringInt(a1 string, a2 []byte, a3, a4 string, a5 int64) {
+	r.string(a1)
+	r.buf = append(r.buf, '\r', '\n', '$')
+	r.bytes(a2)
+	r.buf = append(r.buf, '\r', '\n', '$')
+	r.string(a3)
+	r.buf = append(r.buf, '\r', '\n', '$')
+	r.string(a4)
+	r.buf = append(r.buf, '\r', '\n', '$')
+	r.decimal(a5)
+	r.buf = append(r.buf, '\r', '\n')
+}
+
+func (r *request) addStringBytesMapLists(a1 []string, a2 [][]byte) error {
+	if len(a1) != len(a2) {
+		return errMapSlices
+	}
+	for i, key := range a1 {
+		r.buf = append(r.buf, '\r', '\n', '$')
+		r.string(key)
+		r.buf = append(r.buf, '\r', '\n', '$')
+		r.bytes(a2[i])
+	}
+	r.buf = append(r.buf, '\r', '\n')
+	return nil
+}
+
+func (r *request) addStringInt(a1 string, a2 int64) {
+	r.string(a1)
+	r.buf = append(r.buf, '\r', '\n', '$')
+	r.decimal(a2)
+	r.buf = append(r.buf, '\r', '\n')
+}
+
+func (r *request) addStringString(a1, a2 string) {
+	r.string(a1)
+	r.buf = append(r.buf, '\r', '\n', '$')
+	r.string(a2)
+	r.buf = append(r.buf, '\r', '\n')
+}
+
+func (r *request) addStringStringString(a1, a2, a3 string) {
+	r.string(a1)
+	r.buf = append(r.buf, '\r', '\n', '$')
+	r.string(a2)
+	r.buf = append(r.buf, '\r', '\n', '$')
+	r.string(a3)
+	r.buf = append(r.buf, '\r', '\n')
+}
+
+func (r *request) addStringStringStringInt(a1, a2, a3 string, a4 int64) {
+	r.string(a1)
+	r.buf = append(r.buf, '\r', '\n', '$')
+	r.string(a2)
+	r.buf = append(r.buf, '\r', '\n', '$')
+	r.string(a3)
+	r.buf = append(r.buf, '\r', '\n', '$')
+	r.decimal(a4)
+	r.buf = append(r.buf, '\r', '\n')
+}
+
+func (r *request) addStringStringStringStringInt(a1, a2, a3, a4 string, a5 int64) {
+	r.string(a1)
+	r.buf = append(r.buf, '\r', '\n', '$')
+	r.string(a2)
+	r.buf = append(r.buf, '\r', '\n', '$')
+	r.string(a3)
+	r.buf = append(r.buf, '\r', '\n', '$')
+	r.string(a4)
+	r.buf = append(r.buf, '\r', '\n', '$')
+	r.decimal(a5)
+	r.buf = append(r.buf, '\r', '\n')
+}
+
+func (r *request) addStringStringMapLists(a1, a2 []string) error {
+	if len(a1) != len(a2) {
+		return errMapSlices
+	}
+	for i, key := range a1 {
+		r.buf = append(r.buf, '\r', '\n', '$')
+		r.string(key)
+		r.buf = append(r.buf, '\r', '\n', '$')
+		r.string(a2[i])
+	}
+	r.buf = append(r.buf, '\r', '\n')
+	return nil
+}
+
+func (r *request) addStringStringList(a1 string, a2 []string) {
+	r.string(a1)
+	for _, s := range a2 {
+		r.buf = append(r.buf, '\r', '\n', '$')
+		r.string(s)
+	}
+	r.buf = append(r.buf, '\r', '\n')
+}
+
+func (r *request) addBytesBytesBytes(a1, a2, a3 []byte) {
+	r.bytes(a1)
+	r.buf = append(r.buf, '\r', '\n', '$')
+	r.bytes(a2)
+	r.buf = append(r.buf, '\r', '\n', '$')
+	r.bytes(a3)
+	r.buf = append(r.buf, '\r', '\n')
+}
+
+func (r *request) addBytesBytesStringList(a1, a2 []byte, a3 []string) {
+	r.bytes(a1)
+	r.buf = append(r.buf, '\r', '\n', '$')
+	r.bytes(a2)
+	for _, s := range a3 {
+		r.buf = append(r.buf, '\r', '\n', '$')
+		r.string(s)
+	}
+	r.buf = append(r.buf, '\r', '\n')
+}
+
+func (r *request) addBytesBytesBytesMapLists(a1 []byte, a2, a3 [][]byte) error {
+	if len(a2) != len(a3) {
+		return errMapSlices
+	}
+	r.bytes(a1)
+	for i, key := range a2 {
+		r.buf = append(r.buf, '\r', '\n', '$')
+		r.bytes(key)
+		r.buf = append(r.buf, '\r', '\n', '$')
+		r.bytes(a3[i])
+	}
+	r.buf = append(r.buf, '\r', '\n')
+	return nil
+}
+
+func (r *request) addBytesIntBytes(a1 []byte, a2 int64, a3 []byte) {
+	r.bytes(a1)
+	r.buf = append(r.buf, '\r', '\n', '$')
+	r.decimal(a2)
+	r.buf = append(r.buf, '\r', '\n', '$')
+	r.bytes(a3)
+	r.buf = append(r.buf, '\r', '\n')
+}
+
+func (r *request) addBytesIntInt(a1 []byte, a2, a3 int64) {
+	r.bytes(a1)
+	r.buf = append(r.buf, '\r', '\n', '$')
+	r.decimal(a2)
+	r.buf = append(r.buf, '\r', '\n', '$')
+	r.decimal(a3)
+	r.buf = append(r.buf, '\r', '\n')
+}
+
+func (r *request) addStringBytesStringList(a1 string, a2 []byte, a3 []string) {
+	r.string(a1)
+	r.buf = append(r.buf, '\r', '\n', '$')
+	r.bytes(a2)
+	r.buf = append(r.buf, a2...)
+	for _, s := range a3 {
+		r.buf = append(r.buf, '\r', '\n', '$')
+		r.string(s)
+	}
+	r.buf = append(r.buf, '\r', '\n')
+}
+
+func (r *request) addStringIntBytes(a1 string, a2 int64, a3 []byte) {
+	r.string(a1)
+	r.buf = append(r.buf, '\r', '\n', '$')
+	r.decimal(a2)
+	r.buf = append(r.buf, '\r', '\n', '$')
+	r.bytes(a3)
+	r.buf = append(r.buf, '\r', '\n')
+}
+
+func (r *request) addStringIntInt(a1 string, a2, a3 int64) {
+	r.string(a1)
+	r.buf = append(r.buf, '\r', '\n', '$')
+	r.decimal(a2)
+	r.buf = append(r.buf, '\r', '\n', '$')
+	r.decimal(a3)
+	r.buf = append(r.buf, '\r', '\n')
+}
+
+func (r *request) addStringIntString(a1 string, a2 int64, a3 string) {
+	r.string(a1)
+	r.buf = append(r.buf, '\r', '\n', '$')
+	r.decimal(a2)
+	r.buf = append(r.buf, '\r', '\n', '$')
+	r.string(a3)
+	r.buf = append(r.buf, '\r', '\n')
+}
+
+func (r *request) addStringStringBytes(a1, a2 string, a3 []byte) {
+	r.string(a1)
+	r.buf = append(r.buf, '\r', '\n', '$')
+	r.string(a2)
+	r.buf = append(r.buf, '\r', '\n', '$')
+	r.bytes(a3)
+	r.buf = append(r.buf, '\r', '\n')
+}
+
+func (r *request) addStringStringStringList(a1, a2 string, a3 []string) {
+	r.string(a1)
+	r.buf = append(r.buf, '\r', '\n', '$')
+	r.string(a2)
+	for _, s := range a3 {
+		r.buf = append(r.buf, '\r', '\n', '$')
+		r.string(s)
+	}
+	r.buf = append(r.buf, '\r', '\n')
+}
+
+func (r *request) addStringStringBytesMapLists(a1 string, a2 []string, a3 [][]byte) error {
+	if len(a2) != len(a3) {
+		return errMapSlices
+	}
+	r.string(a1)
+	for i, key := range a2 {
+		r.buf = append(r.buf, '\r', '\n', '$')
+		r.string(key)
+		r.buf = append(r.buf, '\r', '\n', '$')
+		r.bytes(a3[i])
+	}
+	r.buf = append(r.buf, '\r', '\n')
+	return nil
+}
+
+func (r *request) addStringStringStringMapLists(a1 string, a2, a3 []string) error {
+	if len(a2) != len(a3) {
+		return errMapSlices
+	}
+	r.string(a1)
+	for i, key := range a2 {
+		r.buf = append(r.buf, '\r', '\n', '$')
+		r.string(key)
+		r.buf = append(r.buf, '\r', '\n', '$')
+		r.string(a3[i])
+	}
+	r.buf = append(r.buf, '\r', '\n')
+	return nil
+}
+
+func (r *request) addDecimal(v int64) {
+	r.decimal(v)
+	r.buf = append(r.buf, '\r', '\n')
+}
+
+func (r *request) bytes(v []byte) {
+	r.buf = strconv.AppendUint(r.buf, uint64(len(v)), 10)
+	r.buf = append(r.buf, '\r', '\n')
+	r.buf = append(r.buf, v...)
+}
+
+func (r *request) string(v string) {
+	r.buf = strconv.AppendUint(r.buf, uint64(len(v)), 10)
+	r.buf = append(r.buf, '\r', '\n')
+	r.buf = append(r.buf, v...)
+}
+
+func (r *request) decimal(v int64) {
+	sizeOffset := len(r.buf)
+	sizeSingleDigit := v > -1e8 && v < 1e9
+	if sizeSingleDigit {
+		r.buf = append(r.buf, 0, '\r', '\n')
+	} else {
+		r.buf = append(r.buf, 0, 0, '\r', '\n')
+	}
+
+	valueOffset := len(r.buf)
+	r.buf = strconv.AppendInt(r.buf, v, 10)
+	size := len(r.buf) - valueOffset
+	if sizeSingleDigit {
+		r.buf[sizeOffset] = byte(size + '0')
+	} else { // two digits
+		r.buf[sizeOffset] = byte(size/10 + '0')
+		r.buf[sizeOffset+1] = byte(size%10 + '0')
 	}
 }
