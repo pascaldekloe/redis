@@ -291,6 +291,30 @@ func readArraySize(r *bufio.Reader) (int64, error) {
 	return -1, fmt.Errorf("%w; want an array, received %.40q", errProtocol, line)
 }
 
+func decodePushArray(r *bufio.Reader) (pushType, dest string, message []byte, err error) {
+	if size, err := readArraySize(r); size < 0 {
+		return "", "", nil, err
+	} else if size != 3 {
+		return "", "", nil, fmt.Errorf("%w; received a push array with %d elements", errProtocol, size)
+	}
+
+	pushType, _, err = decodeBulkString(r)
+	if err != nil {
+		return "", "", nil, err
+	}
+
+	dest, _, err = decodeBulkString(r)
+	if err != nil {
+		return "", "", nil, err
+	}
+	if pushType == "message" {
+		message, err = decodeBulkBytes(r)
+	} else {
+		_, err = decodeInteger(r)
+	}
+	return
+}
+
 // errMapSlices rejects execution due malformed invocation.
 var errMapSlices = errors.New("redis: number of keys doesn't match number of values")
 
