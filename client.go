@@ -13,9 +13,6 @@ const (
 	// Number of pending requests limit per network protocol.
 	queueSizeTCP  = 128
 	queueSizeUnix = 512
-
-	// Idle period after a failed network connect attempt.
-	reconnectDelay = 100 * time.Millisecond
 )
 
 // ErrClosed rejects command execution after Client.Close.
@@ -127,31 +124,36 @@ func (c *Client) connect() {
 		network = "unix"
 	}
 
-	for firstAttempt := true; ; firstAttempt = false {
+	var reconnectDelay time.Duration
+	for {
 		conn, err := net.DialTimeout(network, c.Addr, c.connectTimeout)
 		if err != nil {
 			// closed loop protection:
 			retry := time.NewTimer(reconnectDelay)
 
-			if !firstAttempt {
-				// remove previous error; unless closed
+			// propagate connection failure
+			if reconnectDelay != 0 {
+				// remove previous error unless closed
 				current := <-c.connSem
 				if current.offline == ErrClosed {
 					c.connSem <- current // restore
 					return               // abandon
 				}
 			}
-
-			// propagate connection failure
 			c.connSem <- &redisConn{
 				offline: fmt.Errorf("redis: offline due %w", err),
 			}
 
+			if reconnectDelay < 512*time.Millisecond {
+				reconnectDelay = 2*reconnectDelay + time.Millisecond
+			}
 			<-retry.C
 			continue
 		}
 
-		if !firstAttempt {
+		if reconnectDelay != 0 {
+			reconnectDelay = 0
+
 			// clear previous error; unless closed
 			current := <-c.connSem
 			if current.offline == ErrClosed {
