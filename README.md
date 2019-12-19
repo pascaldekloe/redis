@@ -49,7 +49,7 @@ func Ping() {
 ```
 
 
-## (Pub/Sub)[https://redis.io/topics/pubsub] With Go Channels
+## [Pub/Sub](https://redis.io/topics/pubsub) With Go Channels
 
 ```go
 // RedisListener is a thread-safe registry.
