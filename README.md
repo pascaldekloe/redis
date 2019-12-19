@@ -21,19 +21,62 @@ This is free and unencumbered software released into the
 [public domain](https://creativecommons.org/publicdomain/zero/1.0).
 
 
-## Use
+## Synchonous Command Execution
 
 ```go
 // Redis is a thread-safe client.
 var Redis = redis.NewClient("localhost", time.Second, time.Second)
 
-func demo() {
+// Grow adds a string to a list.
+func Grow() {
 	newLen, err := Redis.RPUSHString("demo_list", "foo")
 	if err != nil {
 		log.Print("demo_list update error: ", err)
 		return
 	}
 	log.Printf("demo_list has %d elements", newLen)
+}
+
+// Ping pushes a message to a publish–subscribe channel.
+func Ping() {
+	clientCount, err := Redis.PUBLISHString("demo_channel", "ping")
+	if err != nil {
+		log.Print("demo_channel publish error: ", err)
+		return
+	}
+	log.Printf("pinged %d clients in demo_channel", clientCount)
+}
+```
+
+
+## (Pub/Sub)[https://redis.io/topics/pubsub] With Go Channels
+
+```go
+// RedisListener is a thread-safe registry.
+var RedisListener := Redis.NewListener()
+
+func main() {
+	time.AfterFunc(time.Minute, func() {
+		log.Print("shutdown")
+		RedisListener.Close()
+	})
+
+	for err := range RedisListener.Errs {
+		log.Print("subscription error: ", err)
+	}
+	log.Print("closed")
+}
+
+// Peek receives messages from a publish–subscribe channel.
+func Peek() {
+	messages, UNSUBSCRIBE := RedisListener.SUBSCRIBE("demo_channel")
+
+	time.AfterFunc(10*time.Second, UNSUBSCRIBE)
+
+	for bytes := range messages {
+		log.Printf("got message %q", bytes)
+	}
+	log.Print("unsubscribed")
 }
 ```
 

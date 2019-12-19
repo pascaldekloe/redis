@@ -27,23 +27,22 @@ type subscription struct {
 	unsubscribe func()
 }
 
-// Listener is a subscription registry. The Errs channel MUST be read
-// continuously until closed. Broken connection states cause automated
-// reconnects.
+// Listener is a registry for <https://redis.io/topics/pubsub>.
+// The Errs channel MUST be read continuously until closed.
+// Broken connection states cause automated reconnects.
+// Multiple goroutines may invoke methods on a Listener simultaneously.
 type Listener struct {
-	mutex sync.Mutex
-
 	// Connection error propagation is closed uppon Close.
 	Errs <-chan error
-	// copy of Errs for send
+	// hidden copy of Errs for send
 	errs   chan error
 	closed chan struct{}
 	ctx    context.Context
 	cancel func()
 
 	client *Client
+	mutex  sync.Mutex
 	conn   net.Conn
-
 	// requested subscription state
 	subs   map[string]subscription
 	unsubs map[string]struct{}
