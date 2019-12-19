@@ -1,6 +1,10 @@
 package redis
 
 import (
+	"encoding/binary"
+	"flag"
+	"fmt"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -12,6 +16,7 @@ func newTestListener(t *testing.T) (l *Listener, timeout *time.Timer, done chan 
 
 	go func() {
 		defer close(done)
+		defer timeout.Stop()
 
 		for {
 			select {
@@ -179,4 +184,81 @@ func TestListenerClose(t *testing.T) {
 
 	UNSUBSCRIBE() // because we can
 	UNSUBSCRIBE() // because we can
+}
+
+func BenchmarkPubSub(b *testing.B) {
+	testing.Init()
+	benchTime, err := time.ParseDuration(flag.Lookup("test.benchtime").Value.String())
+	if err != nil {
+		b.Fatal("benchtime flag:", err)
+	}
+
+	l := benchClient.NewListener()
+	defer l.Close()
+	go func() {
+		for err := range l.Errs {
+			b.Error("listener error:", err)
+		}
+	}()
+
+	channel := randomKey("channel")
+	messages, _ := l.SUBSCRIBE(channel)
+	// await subscription
+	time.Sleep(20 * time.Millisecond)
+
+	for _, size := range []int{8, 800, 24000} {
+		b.Run(fmt.Sprintf("%dB", size), func(b *testing.B) {
+			for _, routines := range []int{1, 2, 16} {
+				b.Run(fmt.Sprintf("%dpublishers", routines), func(b *testing.B) {
+					b.SetBytes(int64(size))
+
+					timeout := time.NewTimer(benchTime + time.Second)
+					defer timeout.Stop()
+
+					// publish
+					ready := make(chan struct{})
+					pubN := int64(b.N)
+					var pubTimeNS int64
+					pubFunc := func() {
+						message := make([]byte, size)
+						ready <- struct{}{}
+
+						start := time.Now().UnixNano()
+						for atomic.AddInt64(&pubN, -1) >= 0 {
+							binary.LittleEndian.PutUint64(message, uint64(time.Now().UnixNano()))
+							benchClient.PUBLISH(channel, message)
+						}
+						atomic.AddInt64(&pubTimeNS, time.Now().UnixNano()-start)
+					}
+					for i := 0; i < routines; i++ {
+						go pubFunc()
+					}
+					// await routines blocking on ready
+					time.Sleep(time.Millisecond)
+
+					// launch
+					b.ResetTimer()
+					for i := 0; i < routines; i++ {
+						<-ready
+					}
+					var delayNS uint64
+					for i := 0; i < b.N; i++ {
+						select {
+						case <-timeout.C:
+							b.Fatalf("got %d out of %d messages", i, b.N)
+
+						case m := <-messages:
+							if len(m) != size {
+								b.Fatalf("got %d bytes, want %d", len(m), size)
+							}
+							delayNS += uint64(time.Now().UnixNano()) - binary.LittleEndian.Uint64(m)
+						}
+					}
+
+					b.ReportMetric(float64(delayNS)/float64(b.N), "ns/delay")
+					b.ReportMetric(float64(pubTimeNS)/float64(b.N), "ns/publish")
+				})
+			}
+		})
+	}
 }

@@ -310,7 +310,7 @@ func BenchmarkBulk(b *testing.B) {
 		}
 	}
 
-	for _, size := range []int{1, 144, 20736} {
+	for _, size := range []int{8, 800, 24000} {
 		b.Run(fmt.Sprintf("%dB", size), func(b *testing.B) {
 			if err := benchClient.SET(key, make([]byte, size)); err != nil {
 				b.Fatal("population error:", err)
@@ -318,11 +318,13 @@ func BenchmarkBulk(b *testing.B) {
 
 			b.Run("sequential", func(b *testing.B) {
 				b.Run("bytes", func(b *testing.B) {
+					b.SetBytes(int64(size))
 					for i := 0; i < b.N; i++ {
 						getBytes(b, size)
 					}
 				})
 				b.Run("string", func(b *testing.B) {
+					b.SetBytes(int64(size))
 					for i := 0; i < b.N; i++ {
 						getString(b, size)
 					}
@@ -331,6 +333,7 @@ func BenchmarkBulk(b *testing.B) {
 
 			b.Run("parallel", func(b *testing.B) {
 				b.Run("bytes", func(b *testing.B) {
+					b.SetBytes(int64(size))
 					b.RunParallel(func(pb *testing.PB) {
 						for pb.Next() {
 							getBytes(b, size)
@@ -338,6 +341,7 @@ func BenchmarkBulk(b *testing.B) {
 					})
 				})
 				b.Run("string", func(b *testing.B) {
+					b.SetBytes(int64(size))
 					b.RunParallel(func(pb *testing.PB) {
 						for pb.Next() {
 							getString(b, size)
@@ -390,11 +394,13 @@ func BenchmarkArray(b *testing.B) {
 
 			b.Run("sequential", func(b *testing.B) {
 				b.Run("bytes", func(b *testing.B) {
+					b.SetBytes(size * 8)
 					for i := 0; i < b.N; i++ {
 						getBytes(b, size)
 					}
 				})
 				b.Run("string", func(b *testing.B) {
+					b.SetBytes(size * 8)
 					for i := 0; i < b.N; i++ {
 						getString(b, size)
 					}
@@ -403,6 +409,7 @@ func BenchmarkArray(b *testing.B) {
 
 			b.Run("parallel", func(b *testing.B) {
 				b.Run("bytes", func(b *testing.B) {
+					b.SetBytes(size * 8)
 					b.RunParallel(func(pb *testing.PB) {
 						for pb.Next() {
 							getBytes(b, size)
@@ -410,6 +417,7 @@ func BenchmarkArray(b *testing.B) {
 					})
 				})
 				b.Run("string", func(b *testing.B) {
+					b.SetBytes(size * 8)
 					b.RunParallel(func(pb *testing.PB) {
 						for pb.Next() {
 							getString(b, size)
