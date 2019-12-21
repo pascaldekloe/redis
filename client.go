@@ -265,24 +265,30 @@ func (c *Client) commandInteger(req *request) (int64, error) {
 	return integer, err
 }
 
-func (c *Client) commandBulkBytes(req *request) ([]byte, error) {
+func (c *Client) commandBlobBytes(req *request) ([]byte, error) {
 	r, err := c.submit(req)
 	if err != nil {
 		return nil, err
 	}
-	bytes, err := decodeBulkBytes(r)
+	bytes, err := decodeBlobBytes(r)
 	c.pass(r, err)
+	if err == errNull {
+		return nil, nil
+	}
 	return bytes, err
 }
 
-func (c *Client) commandBulkString(req *request) (string, bool, error) {
+func (c *Client) commandBlobString(req *request) (string, bool, error) {
 	r, err := c.submit(req)
 	if err != nil {
 		return "", false, err
 	}
-	s, ok, err := decodeBulkString(r)
+	s, err := decodeBlobString(r)
 	c.pass(r, err)
-	return s, ok, err
+	if err == errNull {
+		return "", false, nil
+	}
+	return s, true, err
 }
 
 func (c *Client) commandBytesArray(req *request) ([][]byte, error) {
@@ -292,6 +298,9 @@ func (c *Client) commandBytesArray(req *request) ([][]byte, error) {
 	}
 	array, err := decodeBytesArray(r)
 	c.pass(r, err)
+	if err == errNull {
+		return nil, nil
+	}
 	return array, err
 }
 
@@ -302,6 +311,9 @@ func (c *Client) commandStringArray(req *request) ([]string, error) {
 	}
 	array, err := decodeStringArray(r)
 	c.pass(r, err)
+	if err == errNull {
+		return nil, nil
+	}
 	return array, err
 }
 
