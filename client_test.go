@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 )
@@ -180,6 +181,29 @@ func TestReadError(t *testing.T) {
 	_, err := testClient.DEL("key")
 	if !errors.Is(err, io.EOF) {
 		t.Errorf("got error %v, want a EOF", err)
+	}
+}
+
+// Note that testClient must recover for the next test to pass.
+func TestSELECTError(t *testing.T) {
+	err := testClient.SELECT(-128)
+	if err == nil {
+		t.Fatal("no error for broken SELECT")
+	}
+	if !errors.As(err, new(ServerError)) {
+		t.Errorf("broken SELECT got error %q, want a ServerError", err)
+	}
+
+	if err := testClient.SET("key", nil); err == nil {
+		t.Error("no error for command while broken SELECT")
+	} else if !strings.Contains(err.Error(), "offline due SELECT") {
+		t.Errorf("command got error %q, want offline due SELECT", err)
+	}
+
+	testClient.SELECT(0)
+	time.Sleep(time.Second)
+	if err := testClient.SET("key", nil); err != nil {
+		t.Error("SELECT did not recover; command error:", err)
 	}
 }
 

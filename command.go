@@ -3,6 +3,7 @@ package redis
 import (
 	"errors"
 	"fmt"
+	"sync/atomic"
 	"time"
 )
 
@@ -64,10 +65,13 @@ func (o *SETOptions) args() (existArg, expireArg string, expire int64, err error
 }
 
 // SELECT executes <https://redis.io/commands/select>.
+// The selection is restored automatically on connection loss. Client executes
+// all commands in db after a SELECT, even when the return is in error.
 func (c *Client) SELECT(db int64) error {
+	atomic.StoreInt64(&c.db, db)
 	r := newRequest("*2\r\n$6\r\nSELECT\r\n$")
 	r.addDecimal(db)
-	return c.commandOK(r)
+	return c.commandRequireOK(r)
 }
 
 // MOVE executes <https://redis.io/commands/move>.

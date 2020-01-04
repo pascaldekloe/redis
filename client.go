@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"sync/atomic"
 	"time"
 )
 
@@ -29,6 +30,9 @@ var errConnLost = errors.New("redis: connection lost while awaiting response")
 type Client struct {
 	// Normalized service address in use. This field is read-only.
 	Addr string
+
+	// database SELECT
+	db int64
 
 	// network establishment expiry
 	connectTimeout time.Duration
@@ -131,19 +135,21 @@ func (c *Client) connect() {
 			// closed loop protection:
 			retry := time.NewTimer(reconnectDelay)
 
-			// propagate connection failure
+			// remove previous connect error unless closed
 			if reconnectDelay != 0 {
-				// remove previous error unless closed
 				current := <-c.connSem
 				if current.offline == ErrClosed {
 					c.connSem <- current // restore
+					retry.Stop()         // cleanup
 					return               // abandon
 				}
 			}
+			// propagate connection failure
 			c.connSem <- &redisConn{
 				offline: fmt.Errorf("redis: offline due %w", err),
 			}
 
+			// increase retry delay
 			if reconnectDelay < 512*time.Millisecond {
 				reconnectDelay = 2*reconnectDelay + time.Millisecond
 			}
@@ -151,10 +157,10 @@ func (c *Client) connect() {
 			continue
 		}
 
+		// remove any connect error unless closed
 		if reconnectDelay != 0 {
 			reconnectDelay = 0
 
-			// clear previous error; unless closed
 			current := <-c.connSem
 			if current.offline == ErrClosed {
 				c.connSem <- current // restore
@@ -168,12 +174,33 @@ func (c *Client) connect() {
 			tcp.SetNoDelay(false)
 			tcp.SetLinger(0)
 		}
+		reader := bufio.NewReaderSize(conn, conservativeMSS)
 
-		// apply
-		c.connSem <- &redisConn{
-			Conn: conn,
-			idle: bufio.NewReaderSize(conn, conservativeMSS),
+		// apply DB selection
+		if db := atomic.LoadInt64(&c.db); db != 0 {
+			req := newRequest("*2\r\n$6\r\nSELECT\r\n$")
+			req.addDecimal(db)
+			if c.commandTimeout != 0 {
+				conn.SetDeadline(time.Now().Add(c.commandTimeout))
+			}
+			if _, err := conn.Write(req.buf); err != nil {
+				c.connSem <- &redisConn{
+					offline: fmt.Errorf("redis: offline due %w", err),
+				}
+				reconnectDelay = time.Millisecond
+				continue
+			}
+			if err = decodeOK(reader); err != nil {
+				c.connSem <- &redisConn{
+					offline: fmt.Errorf("redis: offline due SELECT; %w", err),
+				}
+				reconnectDelay = time.Millisecond
+				continue
+			}
 		}
+
+		// release
+		c.connSem <- &redisConn{Conn: conn, idle: reader}
 		return
 	}
 }
@@ -252,6 +279,20 @@ func (c *Client) commandOK(req *request) error {
 	}
 	err = decodeOK(r)
 	c.pass(r, err)
+	return err
+}
+
+func (c *Client) commandRequireOK(req *request) error {
+	r, err := c.submit(req)
+	if err != nil {
+		return err
+	}
+	err = decodeOK(r)
+	if err != nil {
+		c.onReceiveError()
+	} else {
+		c.pass(r, nil)
+	}
 	return err
 }
 
