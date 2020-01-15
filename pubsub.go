@@ -32,6 +32,7 @@ type subscription struct {
 // Broken connection states cause automated reconnects.
 // Multiple goroutines may invoke methods on a Listener simultaneously.
 type Listener struct {
+	password string
 	// Connection error propagation is closed uppon Close.
 	Errs <-chan error
 	// hidden copy of Errs for send
@@ -54,6 +55,7 @@ type Listener struct {
 func (c *Client) NewListener() *Listener {
 	errs := make(chan error)
 	l := &Listener{
+		password: c.password,
 		Errs:     errs,
 		errs:     errs,
 		closed:   make(chan struct{}),
@@ -113,16 +115,13 @@ func (l *Listener) connectLoop() {
 				return // terminated by Close
 			}
 
-			// closed loop protection:
-			retry := time.NewTimer(reconnectDelay)
-
 			// propagate error
 			l.errs <- err
 
 			if reconnectDelay < 512*time.Millisecond {
 				reconnectDelay = 2*reconnectDelay + time.Millisecond
 			}
-			<-retry.C
+			<-time.After(reconnectDelay)
 			continue
 		}
 		reconnectDelay = 0 // reset
@@ -134,6 +133,19 @@ func (l *Listener) connectLoop() {
 			conn.Close() // discard
 			return
 		}
+
+		// attempt to auth if applicable
+		reader := bufio.NewReaderSize(conn, conservativeMSS)
+		if err := authenticate(l.password, conn, reader); err != nil {
+			l.errs <- err
+
+			if reconnectDelay < 512*time.Millisecond {
+				reconnectDelay = 2*reconnectDelay + time.Millisecond
+			}
+			<-time.After(reconnectDelay)
+			continue
+		}
+
 		l.conn = conn
 
 		// apply pendig unsubscribes

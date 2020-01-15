@@ -31,6 +31,9 @@ type Client struct {
 	// Normalized service address in use. This field is read-only.
 	Addr string
 
+	// password for Redis auth
+	password string
+
 	// database SELECT
 	db int64
 
@@ -65,7 +68,13 @@ type Client struct {
 // submission blocks on the first attempt. When connection establishment fails,
 // then command submissions receive the error of the last attempt, until the
 // connection restores. A zero connectTimeout defaults to one second.
-func NewClient(addr string, commandTimeout, connectTimeout time.Duration) *Client {
+func NewClient(addr string, commandTimeout, connectTimeout time.Duration, password ...string) *Client {
+	return NewClientWithAuth(addr, commandTimeout, connectTimeout, "")
+}
+
+// NewClientWithAuth launches a managed connection to a service
+// address just like NewClient but also uses password authentication.
+func NewClientWithAuth(addr string, commandTimeout, connectTimeout time.Duration, password string) *Client {
 	addr = normalizeAddr(addr)
 	if connectTimeout == 0 {
 		connectTimeout = time.Second
@@ -77,6 +86,7 @@ func NewClient(addr string, commandTimeout, connectTimeout time.Duration) *Clien
 
 	c := &Client{
 		Addr:           addr,
+		password:       password,
 		commandTimeout: commandTimeout,
 		connectTimeout: connectTimeout,
 
@@ -176,6 +186,15 @@ func (c *Client) connect() {
 		}
 		reader := bufio.NewReaderSize(conn, conservativeMSS)
 
+		// attempt to auth if applicable
+		if err := authenticate(c.password, conn, reader); err != nil {
+			c.connSem <- &redisConn{
+				offline: fmt.Errorf("redis: failed to auth: %w", err),
+			}
+			reconnectDelay = 2*reconnectDelay + time.Millisecond
+			continue
+		}
+
 		// apply DB selection
 		if db := atomic.LoadInt64(&c.db); db != 0 {
 			req := newRequest("*2\r\n$6\r\nSELECT\r\n$")
@@ -203,6 +222,22 @@ func (c *Client) connect() {
 		c.connSem <- &redisConn{Conn: conn, idle: reader}
 		return
 	}
+}
+
+// authenticate passes AUTH to redis if c.password is set.
+func authenticate(password string, conn net.Conn, reader *bufio.Reader) error {
+	if len(password) == 0 {
+		return nil
+	}
+	req := newRequest(fmt.Sprintf("*2\r\n$4\r\nAUTH\r\n$%v\r\n%s\r\n", len(password), password))
+	conn.SetDeadline(time.Now().Add(time.Second))
+	if _, err := conn.Write(req.buf); err != nil {
+		return err
+	}
+	if err := decodeOK(reader); err != nil {
+		return err
+	}
+	return nil
 }
 
 // CancelQueue signals connection loss to all pending commands.

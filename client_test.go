@@ -21,11 +21,22 @@ func init() {
 	if addr == "" {
 		log.Fatal("Need TEST_REDIS_ADDR evironment variable with an address of a test server.\nCAUTION! Tests insert, modify and delete data.")
 	}
-	testClient = NewClient(addr, time.Second, time.Second)
-	benchClient = NewClient(addr, 0, 0)
+	password, ok := os.LookupEnv("TEST_REDIS_PASSWORD")
+	if !ok {
+		log.Println("$TEST_REDIS_PASSWORD evironment variable not set. Not testing authentication.")
+	}
+	testClient = NewClientWithAuth(addr, time.Second, time.Second, password)
+	benchClient = NewClientWithAuth(addr, 0, 0, password)
 
 	// make random keys vary
 	rand.Seed(time.Now().UnixNano())
+}
+
+func newTestClient(addr string, commandTimeout, connectTimeout time.Duration) *Client {
+	if password, ok := os.LookupEnv("TEST_REDIS_PASSWORD"); ok {
+		return NewClientWithAuth(addr, commandTimeout, connectTimeout, password)
+	}
+	return NewClient(addr, commandTimeout, connectTimeout)
 }
 
 func randomKey(prefix string) string {
@@ -34,7 +45,7 @@ func randomKey(prefix string) string {
 
 func TestClose(t *testing.T) {
 	t.Parallel()
-	c := NewClient(testClient.Addr, 0, 0)
+	c := newTestClient(testClient.Addr, 0, 0)
 	if err := c.Close(); err != nil {
 		t.Fatal("close got error:", err)
 	}
@@ -50,7 +61,7 @@ func TestClose(t *testing.T) {
 
 func TestCloseBussy(t *testing.T) {
 	t.Parallel()
-	c := NewClient(testClient.Addr, 0, 0)
+	c := newTestClient(testClient.Addr, 0, 0)
 	key := randomKey("counter")
 
 	timeout := time.NewTimer(time.Second)
@@ -93,7 +104,7 @@ func TestUnavailable(t *testing.T) {
 
 	connectTimeout := 100 * time.Millisecond
 
-	c := NewClient("doesnotexist.example.com:70", 0, connectTimeout)
+	c := newTestClient("doesnotexist.example.com:70", 0, 0)
 	defer func() {
 		if err := c.Close(); err != nil {
 			t.Error("close got error:", err)
