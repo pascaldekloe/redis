@@ -196,8 +196,8 @@ func TestSELECTError(t *testing.T) {
 
 	if err := testClient.SET("key", nil); err == nil {
 		t.Error("no error for command while broken SELECT")
-	} else if !strings.Contains(err.Error(), "offline due SELECT") {
-		t.Errorf("command got error %q, want offline due SELECT", err)
+	} else if !strings.Contains(err.Error(), " initial connection SELECT ") {
+		t.Errorf("command got error %q, want mention of initial connection SELECT", err)
 	}
 
 	testClient.SELECT(0)

@@ -33,7 +33,7 @@ type Client struct {
 
 	noCopy noCopy
 
-	// database SELECT
+	// sticky database SELECT
 	db int64
 
 	// network establishment expiry
@@ -138,13 +138,15 @@ func (c *Client) connect() {
 			retry := time.NewTimer(reconnectDelay)
 
 			// remove previous connect error unless closed
-			if reconnectDelay != 0 {
-				current := <-c.connSem
+			select {
+			case current := <-c.connSem:
 				if current.offline == ErrClosed {
 					c.connSem <- current // restore
 					retry.Stop()         // cleanup
 					return               // abandon
 				}
+			default:
+				break
 			}
 			// propagate connection failure
 			c.connSem <- &redisConn{
@@ -158,17 +160,18 @@ func (c *Client) connect() {
 			<-retry.C
 			continue
 		}
+		reconnectDelay = 0
 
 		// remove any connect error unless closed
-		if reconnectDelay != 0 {
-			reconnectDelay = 0
-
-			current := <-c.connSem
+		select {
+		case current := <-c.connSem:
 			if current.offline == ErrClosed {
 				c.connSem <- current // restore
 				conn.Close()         // discard
 				return               // abandon
 			}
+		default:
+			break
 		}
 
 		// connection tuning
@@ -178,27 +181,14 @@ func (c *Client) connect() {
 		}
 		reader := bufio.NewReaderSize(conn, conservativeMSS)
 
-		// apply DB selection
-		if db := atomic.LoadInt64(&c.db); db != 0 {
-			req := newRequest("*2\r\n$6\r\nSELECT\r\n$")
-			req.addDecimal(db)
-			if c.commandTimeout != 0 {
-				conn.SetDeadline(time.Now().Add(c.commandTimeout))
+		err = initSELECT(atomic.LoadInt64(&c.db), conn, reader, c.commandTimeout)
+		if err != nil {
+			c.connSem <- &redisConn{
+				offline: err,
 			}
-			if _, err := conn.Write(req.buf); err != nil {
-				c.connSem <- &redisConn{
-					offline: fmt.Errorf("redis: offline due %w", err),
-				}
-				reconnectDelay = time.Millisecond
-				continue
-			}
-			if err = decodeOK(reader); err != nil {
-				c.connSem <- &redisConn{
-					offline: fmt.Errorf("redis: offline due SELECT; %w", err),
-				}
-				reconnectDelay = time.Millisecond
-				continue
-			}
+			conn.Close()
+			time.Sleep(512 * time.Millisecond)
+			continue
 		}
 
 		// release

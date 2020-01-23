@@ -5,6 +5,7 @@ import (
 	"context"
 	"net"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -40,9 +41,14 @@ type Listener struct {
 	ctx    context.Context
 	cancel func()
 
-	client *Client
-	mutex  sync.Mutex
-	conn   net.Conn
+	// client settings (copy)
+	addr           string
+	commandTimeout time.Duration
+	connectTimeout time.Duration
+	db             int64
+
+	mutex sync.Mutex
+	conn  net.Conn
 	// requested subscription state
 	subs   map[string]subscription
 	unsubs map[string]struct{}
@@ -51,16 +57,21 @@ type Listener struct {
 }
 
 // NewListener launches a managed connection.
+//
+// Any following SELECT on c does not affect the database of the Listener.
 func (c *Client) NewListener() *Listener {
 	errs := make(chan error)
 	l := &Listener{
-		Errs:     errs,
-		errs:     errs,
-		closed:   make(chan struct{}),
-		client:   c,
-		subs:     make(map[string]subscription),
-		unsubs:   make(map[string]struct{}),
-		channels: make(map[string]chan []byte),
+		Errs:           errs,
+		errs:           errs,
+		closed:         make(chan struct{}),
+		addr:           c.Addr,
+		commandTimeout: c.commandTimeout,
+		connectTimeout: c.connectTimeout,
+		db:             atomic.LoadInt64(&c.db),
+		subs:           make(map[string]subscription),
+		unsubs:         make(map[string]struct{}),
+		channels:       make(map[string]chan []byte),
 	}
 	l.ctx, l.cancel = context.WithCancel(context.Background())
 
@@ -98,14 +109,14 @@ func (l *Listener) connectLoop() {
 	}()
 
 	network := "tcp"
-	if isUnixAddr(l.client.Addr) {
+	if isUnixAddr(l.addr) {
 		network = "unix"
 	}
 
 	var reconnectDelay time.Duration
 	for {
-		ctx, cancel := context.WithTimeout(l.ctx, l.client.connectTimeout)
-		conn, err := new(net.Dialer).DialContext(ctx, network, l.client.Addr)
+		ctx, cancel := context.WithTimeout(l.ctx, l.connectTimeout)
+		conn, err := new(net.Dialer).DialContext(ctx, network, l.addr)
 		cancel()
 		if err != nil {
 			// woraround https://github.com/golang/go/issues/36208
@@ -126,6 +137,15 @@ func (l *Listener) connectLoop() {
 			continue
 		}
 		reconnectDelay = 0 // reset
+		reader := bufio.NewReaderSize(conn, conservativeMSS)
+
+		err = initSELECT(l.db, conn, reader, l.commandTimeout)
+		if err != nil {
+			l.errs <- err
+			conn.Close()
+			time.Sleep(512 * time.Millisecond)
+			continue
+		}
 
 		l.mutex.Lock()
 		if l.ctx.Err() != nil {
@@ -157,7 +177,7 @@ func (l *Listener) connectLoop() {
 			l.submit(conn, r)
 		}
 
-		err = l.receiveLoop(conn)
+		err = l.receiveLoop(reader)
 		l.mutex.Lock()
 		l.conn = nil
 		l.mutex.Unlock()
@@ -174,9 +194,7 @@ func (l *Listener) connectLoop() {
 	}
 }
 
-func (l *Listener) receiveLoop(conn net.Conn) error {
-	reader := bufio.NewReaderSize(conn, conservativeMSS)
-
+func (l *Listener) receiveLoop(reader *bufio.Reader) error {
 	for {
 		pushType, dest, message, err := decodePushArray(reader)
 		if err != nil {
@@ -219,8 +237,8 @@ func (l *Listener) receiveLoop(conn net.Conn) error {
 // Submit ether sends a request, or causes a reconnect.
 func (l *Listener) submit(conn net.Conn, req *request) {
 	// apply timeout if set
-	if l.client.commandTimeout != 0 {
-		conn.SetWriteDeadline(time.Now().Add(l.client.commandTimeout))
+	if l.commandTimeout != 0 {
+		conn.SetWriteDeadline(time.Now().Add(l.commandTimeout))
 	}
 
 	// send command

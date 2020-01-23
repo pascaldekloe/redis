@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
 
 // Server Limits
@@ -98,6 +99,29 @@ func ParseInt(bytes []byte) int64 {
 		value = -value
 	}
 	return value
+}
+
+func initSELECT(db int64, conn net.Conn, r *bufio.Reader, timeout time.Duration) error {
+	if db == 0 {
+		return nil // matches the default
+	}
+
+	req := newRequest("*2\r\n$6\r\nSELECT\r\n$")
+	req.addDecimal(db)
+
+	if timeout != 0 {
+		conn.SetDeadline(time.Now().Add(timeout))
+		defer conn.SetDeadline(time.Time{})
+	}
+
+	_, err := conn.Write(req.buf)
+	if err == nil {
+		err = decodeOK(r)
+	}
+	if err != nil {
+		return fmt.Errorf("redis: initial connection SELECT with %w", err)
+	}
+	return nil
 }
 
 // errProtocol signals invalid RESP reception.
