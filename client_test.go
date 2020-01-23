@@ -15,14 +15,28 @@ import (
 )
 
 var testClient, benchClient *Client
+var password *string
 
 func init() {
-	addr := os.Getenv("TEST_REDIS_ADDR")
-	if addr == "" {
+	addr, ok := os.LookupEnv("TEST_REDIS_ADDR")
+	if !ok {
 		log.Fatal("Need TEST_REDIS_ADDR evironment variable with an address of a test server.\nCAUTION! Tests insert, modify and delete data.")
 	}
+	if s, ok := os.LookupEnv("TEST_REDIS_PASSWORD"); ok {
+		password = &s
+	}
+
 	testClient = NewClient(addr, time.Second, time.Second)
 	benchClient = NewClient(addr, 0, 0)
+
+	if password != nil {
+		if err := testClient.AUTH(*password); err != nil {
+			log.Fatal("AUTH error:", err)
+		}
+		if err := benchClient.AUTH(*password); err != nil {
+			log.Fatal("AUTH error:", err)
+		}
+	}
 
 	// make random keys vary
 	rand.Seed(time.Now().UnixNano())
@@ -51,6 +65,11 @@ func TestClose(t *testing.T) {
 func TestCloseBussy(t *testing.T) {
 	t.Parallel()
 	c := NewClient(testClient.Addr, 0, 0)
+	if password != nil {
+		if err := c.AUTH(*password); err != nil {
+			t.Fatal("AUTH error:", err)
+		}
+	}
 	key := randomKey("counter")
 
 	timeout := time.NewTimer(time.Second)

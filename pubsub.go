@@ -45,6 +45,7 @@ type Listener struct {
 	addr           string
 	commandTimeout time.Duration
 	connectTimeout time.Duration
+	password       *string
 	db             int64
 
 	mutex sync.Mutex
@@ -59,6 +60,7 @@ type Listener struct {
 // NewListener launches a managed connection.
 //
 // Any following SELECT on c does not affect the database of the Listener.
+// The same goes for password changes with AUTH.
 func (c *Client) NewListener() *Listener {
 	errs := make(chan error)
 	l := &Listener{
@@ -72,6 +74,10 @@ func (c *Client) NewListener() *Listener {
 		subs:           make(map[string]subscription),
 		unsubs:         make(map[string]struct{}),
 		channels:       make(map[string]chan []byte),
+	}
+	if v := c.password.Load(); v != nil {
+		s := v.(string)
+		l.password = &s
 	}
 	l.ctx, l.cancel = context.WithCancel(context.Background())
 
@@ -139,6 +145,15 @@ func (l *Listener) connectLoop() {
 		reconnectDelay = 0 // reset
 		reader := bufio.NewReaderSize(conn, conservativeMSS)
 
+		if l.password != nil {
+			err = initAUTH(*l.password, conn, reader, l.commandTimeout)
+			if err != nil {
+				l.errs <- err
+				conn.Close()
+				time.Sleep(512 * time.Millisecond)
+				continue
+			}
+		}
 		err = initSELECT(l.db, conn, reader, l.commandTimeout)
 		if err != nil {
 			l.errs <- err

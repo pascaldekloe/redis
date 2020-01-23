@@ -33,6 +33,9 @@ type Client struct {
 
 	noCopy noCopy
 
+	// sticky AUTH(entication)
+	password atomic.Value
+
 	// sticky database SELECT
 	db int64
 
@@ -181,6 +184,18 @@ func (c *Client) connect() {
 		}
 		reader := bufio.NewReaderSize(conn, conservativeMSS)
 
+		// apply sticky settings
+		if v := c.password.Load(); v != nil {
+			err = initAUTH(v.(string), conn, reader, c.commandTimeout)
+			if err != nil {
+				c.connSem <- &redisConn{
+					offline: err,
+				}
+				conn.Close()
+				time.Sleep(512 * time.Millisecond)
+				continue
+			}
+		}
 		err = initSELECT(atomic.LoadInt64(&c.db), conn, reader, c.commandTimeout)
 		if err != nil {
 			c.connSem <- &redisConn{
