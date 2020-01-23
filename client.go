@@ -31,6 +31,8 @@ type Client struct {
 	// Normalized service address in use. This field is read-only.
 	Addr string
 
+	noCopy noCopy
+
 	// database SELECT
 	db int64
 
@@ -466,3 +468,14 @@ func (c *Client) haltReceive(writeLock *redisConn) {
 		}
 	}
 }
+
+// noCopy may be embedded into structs which must not be copied
+// after the first use.
+//
+// See https://golang.org/issues/8005#issuecomment-190753527
+// for details.
+type noCopy struct{}
+
+// Lock is a no-op used by -copylocks checker from `go vet`.
+func (*noCopy) Lock()   {}
+func (*noCopy) Unlock() {}
