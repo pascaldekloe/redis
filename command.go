@@ -64,18 +64,23 @@ func (o *SETOptions) args() (existArg, expireArg string, expire int64, err error
 	return
 }
 
-// AUTH executes <https://redis.io/commands/auth>.
-// The authentication is restored automatically on connection loss.
+// AUTH executes <https://redis.io/commands/auth> in a persistent way, even when
+// the return is in error. Any following command executions apply to this
+// password authentication, reconnects included.
+// An empty password string clears the authentication contraint.
 func (c *Client) AUTH(password string) error {
 	c.password.Store(password)
+	if password == "" {
+		return nil
+	}
 	r := newRequest("*2\r\n$4\r\nAUTH\r\n$")
 	r.addString(password)
 	return c.commandRequireOK(r)
 }
 
-// SELECT executes <https://redis.io/commands/select>.
-// The selection is restored automatically on connection loss. Client executes
-// all commands in db after a SELECT, even when the return is in error.
+// SELECT executes <https://redis.io/commands/select> in a persistent way, even
+// when the return is in error. Any following command executions apply to this
+// database selection, reconnects included.
 func (c *Client) SELECT(db int64) error {
 	atomic.StoreInt64(&c.db, db)
 	r := newRequest("*2\r\n$6\r\nSELECT\r\n$")

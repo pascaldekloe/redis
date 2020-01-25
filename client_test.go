@@ -31,10 +31,10 @@ func init() {
 
 	if password != nil {
 		if err := testClient.AUTH(*password); err != nil {
-			log.Fatal("AUTH error:", err)
+			log.Fatal("AUTH error: ", err)
 		}
 		if err := benchClient.AUTH(*password); err != nil {
-			log.Fatal("AUTH error:", err)
+			log.Fatal("AUTH error: ", err)
 		}
 	}
 
@@ -215,8 +215,8 @@ func TestSELECTError(t *testing.T) {
 
 	if err := testClient.SET("key", nil); err == nil {
 		t.Error("no error for command while broken SELECT")
-	} else if !strings.Contains(err.Error(), " initial connection SELECT ") {
-		t.Errorf("command got error %q, want mention of initial connection SELECT", err)
+	} else if s := err.Error(); !strings.Contains(s, "offline") || !strings.Contains(s, "SELECT") {
+		t.Errorf("command got error %q, want mention of offline and SELECT", s)
 	}
 
 	testClient.SELECT(0)

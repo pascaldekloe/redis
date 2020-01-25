@@ -3,6 +3,7 @@ package redis
 import (
 	"bufio"
 	"context"
+	"fmt"
 	"net"
 	"sync"
 	"sync/atomic"
@@ -42,11 +43,7 @@ type Listener struct {
 	cancel func()
 
 	// client settings (copy)
-	addr           string
-	commandTimeout time.Duration
-	connectTimeout time.Duration
-	password       *string
-	db             int64
+	connConfig
 
 	mutex sync.Mutex
 	conn  net.Conn
@@ -64,21 +61,20 @@ type Listener struct {
 func (c *Client) NewListener() *Listener {
 	errs := make(chan error)
 	l := &Listener{
-		Errs:           errs,
-		errs:           errs,
-		closed:         make(chan struct{}),
-		addr:           c.Addr,
-		commandTimeout: c.commandTimeout,
-		connectTimeout: c.connectTimeout,
-		db:             atomic.LoadInt64(&c.db),
-		subs:           make(map[string]subscription),
-		unsubs:         make(map[string]struct{}),
-		channels:       make(map[string]chan []byte),
+		Errs:   errs,
+		errs:   errs,
+		closed: make(chan struct{}),
+		connConfig: connConfig{
+			Addr:           c.Addr,
+			DB:             atomic.LoadInt64(&c.db),
+			CommandTimeout: c.commandTimeout,
+			ConnectTimeout: c.connectTimeout,
+		},
+		subs:     make(map[string]subscription),
+		unsubs:   make(map[string]struct{}),
+		channels: make(map[string]chan []byte),
 	}
-	if v := c.password.Load(); v != nil {
-		s := v.(string)
-		l.password = &s
-	}
+	l.Password, _ = c.password.Load().(string)
 	l.ctx, l.cancel = context.WithCancel(context.Background())
 
 	go l.connectLoop()
@@ -114,53 +110,30 @@ func (l *Listener) connectLoop() {
 		close(l.closed)
 	}()
 
-	network := "tcp"
-	if isUnixAddr(l.addr) {
-		network = "unix"
-	}
-
 	var reconnectDelay time.Duration
 	for {
-		ctx, cancel := context.WithTimeout(l.ctx, l.connectTimeout)
-		conn, err := new(net.Dialer).DialContext(ctx, network, l.addr)
-		cancel()
+		conn, reader, err := connect(l.connConfig)
 		if err != nil {
-			// woraround https://github.com/golang/go/issues/36208
+			// workaround https://github.com/golang/go/issues/36208
 			if l.ctx.Err() != nil {
 				return // terminated by Close
 			}
 
-			// closed loop protection:
+			// closed loop protection
 			retry := time.NewTimer(reconnectDelay)
 
 			// propagate error
-			l.errs <- err
+			l.errs <- fmt.Errorf("redis: listener offline due %w", err)
 
-			if reconnectDelay < 512*time.Millisecond {
-				reconnectDelay = 2*reconnectDelay + time.Millisecond
+			reconnectDelay = 2*reconnectDelay + time.Millisecond
+			if reconnectDelay > time.Second/2 {
+				reconnectDelay = time.Second / 2
 			}
 			<-retry.C
 			continue
 		}
-		reconnectDelay = 0 // reset
-		reader := bufio.NewReaderSize(conn, conservativeMSS)
 
-		if l.password != nil {
-			err = initAUTH(*l.password, conn, reader, l.commandTimeout)
-			if err != nil {
-				l.errs <- err
-				conn.Close()
-				time.Sleep(512 * time.Millisecond)
-				continue
-			}
-		}
-		err = initSELECT(l.db, conn, reader, l.commandTimeout)
-		if err != nil {
-			l.errs <- err
-			conn.Close()
-			time.Sleep(512 * time.Millisecond)
-			continue
-		}
+		reconnectDelay = 0
 
 		l.mutex.Lock()
 		if l.ctx.Err() != nil {
@@ -252,8 +225,8 @@ func (l *Listener) receiveLoop(reader *bufio.Reader) error {
 // Submit ether sends a request, or causes a reconnect.
 func (l *Listener) submit(conn net.Conn, req *request) {
 	// apply timeout if set
-	if l.commandTimeout != 0 {
-		conn.SetWriteDeadline(time.Now().Add(l.commandTimeout))
+	if l.CommandTimeout != 0 {
+		conn.SetWriteDeadline(time.Now().Add(l.CommandTimeout))
 	}
 
 	// send command

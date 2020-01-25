@@ -90,7 +90,7 @@ func NewClient(addr string, commandTimeout, connectTimeout time.Duration) *Clien
 		readInterrupt: make(chan struct{}),
 	}
 
-	go c.connect()
+	go c.connectOrClosed()
 
 	return c
 }
@@ -126,85 +126,55 @@ func (c *Client) Close() error {
 	return nil
 }
 
-// Connect populates the connection semaphore.
-func (c *Client) connect() {
-	network := "tcp"
-	if isUnixAddr(c.Addr) {
-		network = "unix"
-	}
-
+// connectOrClosed populates the connection semaphore.
+func (c *Client) connectOrClosed() {
 	var reconnectDelay time.Duration
 	for {
-		conn, err := net.DialTimeout(network, c.Addr, c.connectTimeout)
+		config := connConfig{
+			Addr:           c.Addr,
+			DB:             atomic.LoadInt64(&c.db),
+			CommandTimeout: c.commandTimeout,
+			ConnectTimeout: c.connectTimeout,
+		}
+		config.Password, _ = c.password.Load().(string)
+		conn, reader, err := connect(config)
 		if err != nil {
-			// closed loop protection:
+			// closed loop protection
 			retry := time.NewTimer(reconnectDelay)
 
 			// remove previous connect error unless closed
-			select {
-			case current := <-c.connSem:
+			if reconnectDelay != 0 {
+				current := <-c.connSem
 				if current.offline == ErrClosed {
 					c.connSem <- current // restore
 					retry.Stop()         // cleanup
 					return               // abandon
 				}
-			default:
-				break
 			}
-			// propagate connection failure
-			c.connSem <- &redisConn{
-				offline: fmt.Errorf("redis: offline due %w", err),
-			}
+			// propagate current connect error
+			c.connSem <- &redisConn{offline: fmt.Errorf("redis: offline due %w", err)}
 
 			// increase retry delay
-			if reconnectDelay < 512*time.Millisecond {
-				reconnectDelay = 2*reconnectDelay + time.Millisecond
+			reconnectDelay = 2*reconnectDelay + time.Millisecond
+			if reconnectDelay > time.Second/2 {
+				reconnectDelay = time.Second / 2
 			}
+
 			<-retry.C
 			continue
 		}
-		reconnectDelay = 0
 
-		// remove any connect error unless closed
-		select {
-		case current := <-c.connSem:
+		// remove previous connect error unless closed
+		if reconnectDelay != 0 {
+			current := <-c.connSem
 			if current.offline == ErrClosed {
 				c.connSem <- current // restore
 				conn.Close()         // discard
 				return               // abandon
 			}
-		default:
-			break
 		}
 
-		// connection tuning
-		if tcp, ok := conn.(*net.TCPConn); ok {
-			tcp.SetNoDelay(false)
-			tcp.SetLinger(0)
-		}
-		reader := bufio.NewReaderSize(conn, conservativeMSS)
-
-		// apply sticky settings
-		if v := c.password.Load(); v != nil {
-			err = initAUTH(v.(string), conn, reader, c.commandTimeout)
-			if err != nil {
-				c.connSem <- &redisConn{
-					offline: err,
-				}
-				conn.Close()
-				time.Sleep(512 * time.Millisecond)
-				continue
-			}
-		}
-		err = initSELECT(atomic.LoadInt64(&c.db), conn, reader, c.commandTimeout)
-		if err != nil {
-			c.connSem <- &redisConn{
-				offline: err,
-			}
-			conn.Close()
-			time.Sleep(512 * time.Millisecond)
-			continue
-		}
+		reconnectDelay = 0
 
 		// release
 		c.connSem <- &redisConn{Conn: conn, idle: reader}
@@ -244,7 +214,7 @@ func (c *Client) submit(req *request) (*bufio.Reader, error) {
 			c.haltReceive(conn)
 			c.cancelQueue()
 			conn.Close()
-			c.connect()
+			c.connectOrClosed()
 		}()
 		return nil, err
 	}
@@ -437,7 +407,7 @@ func (c *Client) onReceiveError() {
 				go func() {
 					conn.Close()
 					c.cancelQueue()
-					c.connect()
+					c.connectOrClosed()
 				}()
 			}
 
@@ -472,6 +442,72 @@ func (c *Client) haltReceive(writeLock *redisConn) {
 			break
 		}
 	}
+}
+
+type connConfig struct {
+	Addr string
+	DB   int64
+
+	Password string
+
+	CommandTimeout time.Duration
+	ConnectTimeout time.Duration
+}
+
+func connect(c connConfig) (net.Conn, *bufio.Reader, error) {
+	network := "tcp"
+	if isUnixAddr(c.Addr) {
+		network = "unix"
+	}
+	conn, err := net.DialTimeout(network, c.Addr, c.ConnectTimeout)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// connection tuning
+	if tcp, ok := conn.(*net.TCPConn); ok {
+		tcp.SetNoDelay(false)
+		tcp.SetLinger(0)
+	}
+	reader := bufio.NewReaderSize(conn, conservativeMSS)
+
+	// apply sticky settings
+	if c.Password != "" {
+		req := newRequest("*2\r\n$4\r\nAUTH\r\n$")
+		defer req.free()
+		req.addString(c.Password)
+
+		if c.CommandTimeout != 0 {
+			conn.SetDeadline(time.Now().Add(c.CommandTimeout))
+			defer conn.SetDeadline(time.Time{})
+		}
+		_, err := conn.Write(req.buf)
+		if err == nil {
+			err = decodeOK(reader)
+		}
+		if err != nil {
+			return nil, nil, fmt.Errorf("redis: AUTH with %w", err)
+		}
+	}
+	if c.DB != 0 {
+		req := newRequest("*2\r\n$6\r\nSELECT\r\n$")
+		defer req.free()
+		req.addDecimal(c.DB)
+
+		if c.CommandTimeout != 0 {
+			conn.SetDeadline(time.Now().Add(c.CommandTimeout))
+			defer conn.SetDeadline(time.Time{})
+		}
+		_, err := conn.Write(req.buf)
+		if err == nil {
+			err = decodeOK(reader)
+		}
+		if err != nil {
+			return nil, nil, fmt.Errorf("redis: SELECT with %w", err)
+		}
+	}
+
+	return conn, reader, nil
 }
 
 // noCopy may be embedded into structs which must not be copied
