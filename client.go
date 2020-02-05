@@ -28,7 +28,7 @@ var errConnLost = errors.New("redis: connection lost while awaiting response")
 // Multiple goroutines may invoke methods on a Client simultaneously. Command
 // invocation applies <https://redis.io/topics/pipelining> on concurrency.
 type Client struct {
-	// Normalized service address in use. This field is read-only.
+	// Normalized node address in use. This field is read-only.
 	Addr string
 
 	noCopy noCopy
@@ -58,7 +58,7 @@ type Client struct {
 	readInterrupt chan struct{}
 }
 
-// NewClient launches a managed connection to a service address.
+// NewClient launches a managed connection to a node (address).
 // The host defaults to localhost, and the port defaults to 6379.
 // Thus, the empty string defaults to "localhost:6379". Use an
 // absolute file path (e.g. "/var/run/redis.sock") for Unix
