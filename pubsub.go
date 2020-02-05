@@ -74,7 +74,7 @@ func (c *Client) NewListener() *Listener {
 		unsubs:   make(map[string]struct{}),
 		channels: make(map[string]chan []byte),
 	}
-	l.Password, _ = c.password.Load().(string)
+	l.Password, _ = c.password.Load().([]byte)
 	l.ctx, l.cancel = context.WithCancel(context.Background())
 
 	go l.connectLoop()

@@ -15,7 +15,7 @@ import (
 )
 
 var testClient, benchClient *Client
-var password *string
+var password []byte
 
 func init() {
 	addr, ok := os.LookupEnv("TEST_REDIS_ADDR")
@@ -23,17 +23,17 @@ func init() {
 		log.Fatal("Need TEST_REDIS_ADDR evironment variable with an address of a test server.\nCAUTION! Tests insert, modify and delete data.")
 	}
 	if s, ok := os.LookupEnv("TEST_REDIS_PASSWORD"); ok {
-		password = &s
+		password = []byte(s)
 	}
 
 	testClient = NewClient(addr, time.Second, time.Second)
 	benchClient = NewClient(addr, 0, 0)
 
 	if password != nil {
-		if err := testClient.AUTH(*password); err != nil {
+		if err := testClient.AUTH(password); err != nil {
 			log.Fatal("AUTH error: ", err)
 		}
-		if err := benchClient.AUTH(*password); err != nil {
+		if err := benchClient.AUTH(password); err != nil {
 			log.Fatal("AUTH error: ", err)
 		}
 	}
@@ -66,7 +66,7 @@ func TestCloseBussy(t *testing.T) {
 	t.Parallel()
 	c := NewClient(testClient.Addr, 0, 0)
 	if password != nil {
-		if err := c.AUTH(*password); err != nil {
+		if err := c.AUTH(password); err != nil {
 			t.Fatal("AUTH error:", err)
 		}
 	}

@@ -65,17 +65,19 @@ func (o *SETOptions) args() (existArg, expireArg string, expire int64, err error
 }
 
 // AUTH executes <https://redis.io/commands/auth> in a persistent way, even when
-// the return is in error. Any following command executions apply to this
-// password authentication, reconnects included.
-// An empty password string clears the authentication contraint.
-func (c *Client) AUTH(password string) error {
+// the return is in error. Any following command execution runs on a connection
+// with password authentication. A nil value resets the password (to none).
+func (c *Client) AUTH(password []byte) error {
 	c.password.Store(password)
-	if password == "" {
-		return nil
+
+	var r *request
+	if password == nil {
+		r = newRequest("*1\r\n$4\r\nQUIT\r\n")
+	} else {
+		r = newRequest("*2\r\n$4\r\nAUTH\r\n$")
+		r.addBytes(password)
 	}
-	r := newRequest("*2\r\n$4\r\nAUTH\r\n$")
-	r.addString(password)
-	return c.commandRequireOK(r)
+	return c.commandOKAndReconnect(r)
 }
 
 // SELECT executes <https://redis.io/commands/select> in a persistent way, even
@@ -85,7 +87,7 @@ func (c *Client) SELECT(db int64) error {
 	atomic.StoreInt64(&c.db, db)
 	r := newRequest("*2\r\n$6\r\nSELECT\r\n$")
 	r.addDecimal(db)
-	return c.commandRequireOK(r)
+	return c.commandOKOrReconnect(r)
 }
 
 // MOVE executes <https://redis.io/commands/move>.

@@ -136,7 +136,7 @@ func (c *Client) connectOrClosed() {
 			CommandTimeout: c.commandTimeout,
 			ConnectTimeout: c.connectTimeout,
 		}
-		config.Password, _ = c.password.Load().(string)
+		config.Password, _ = c.password.Load().([]byte)
 		conn, reader, err := connect(config)
 		if err != nil {
 			// closed loop protection
@@ -259,17 +259,27 @@ func (c *Client) commandOK(req *request) error {
 	return err
 }
 
-func (c *Client) commandRequireOK(req *request) error {
+func (c *Client) commandOKOrReconnect(req *request) error {
 	r, err := c.submit(req)
 	if err != nil {
 		return err
 	}
 	err = decodeOK(r)
 	if err != nil {
-		c.onReceiveError()
+		c.dropConn()
 	} else {
 		c.pass(r, nil)
 	}
+	return err
+}
+
+func (c *Client) commandOKAndReconnect(req *request) error {
+	r, err := c.submit(req)
+	if err != nil {
+		return err
+	}
+	err = decodeOK(r)
+	c.dropConn()
 	return err
 }
 
@@ -343,7 +353,7 @@ func (c *Client) pass(r *bufio.Reader, err error) {
 		break
 	default:
 		if _, ok := err.(ServerError); !ok {
-			c.onReceiveError()
+			c.dropConn()
 			return
 		}
 	}
@@ -382,7 +392,7 @@ func (c *Client) pass(r *bufio.Reader, err error) {
 	}
 }
 
-func (c *Client) onReceiveError() {
+func (c *Client) dropConn() {
 	for {
 		select {
 		case <-c.readInterrupt:
@@ -448,7 +458,7 @@ type connConfig struct {
 	Addr string
 	DB   int64
 
-	Password string
+	Password []byte
 
 	CommandTimeout time.Duration
 	ConnectTimeout time.Duration
@@ -472,10 +482,10 @@ func connect(c connConfig) (net.Conn, *bufio.Reader, error) {
 	reader := bufio.NewReaderSize(conn, conservativeMSS)
 
 	// apply sticky settings
-	if c.Password != "" {
+	if c.Password != nil {
 		req := newRequest("*2\r\n$4\r\nAUTH\r\n$")
 		defer req.free()
-		req.addString(c.Password)
+		req.addBytes(c.Password)
 
 		if c.CommandTimeout != 0 {
 			conn.SetDeadline(time.Now().Add(c.CommandTimeout))
