@@ -9,15 +9,17 @@ import (
 	"time"
 )
 
+// DialDelayMax is the idle limit for automated reconnect attempts.
+// Sequential failure with connection establisment increases the retry
+// delay in steps from 0 to 500 ms.
+const DialDelayMax = time.Second / 2
+
 // Fixed Settings
 const (
 	// Number of pending requests limit per network protocol.
 	queueSizeTCP  = 128
 	queueSizeUnix = 512
 )
-
-// ErrClosed rejects command execution after Client.Close.
-var ErrClosed = errors.New("redis: client closed")
 
 // ErrConnLost signals connection loss to response queue.
 var errConnLost = errors.New("redis: connection lost while awaiting response")
@@ -39,11 +41,11 @@ type Client struct {
 	// sticky database SELECT
 	db int64
 
-	// network establishment expiry
-	connectTimeout time.Duration
-
 	// optional execution expiry
 	commandTimeout time.Duration
+
+	// network establishment expiry
+	dialTimeout time.Duration
 
 	// The connection semaphore is used as a write lock.
 	connSem chan *redisConn
@@ -66,14 +68,16 @@ type Client struct {
 //
 // A command timeout limits the execution duration when nonzero. Expiry causes a
 // reconnect (to prevent stale connections) and a net.Error with Timeout() true.
-// The connect timeout limits the duration for connection establishment. Command
+//
+// The dial timeout limits the duration for network connection establishment.
+// Expiry causes an abort + retry. Zero defaults to one second. Any command
 // submission blocks on the first attempt. When connection establishment fails,
-// then command submissions receive the error of the last attempt, until the
-// connection restores. A zero connectTimeout defaults to one second.
-func NewClient(addr string, commandTimeout, connectTimeout time.Duration) *Client {
+// then command submission receives the error of the last attempt, until the
+// connection restores.
+func NewClient(addr string, commandTimeout, dialTimeout time.Duration) *Client {
 	addr = normalizeAddr(addr)
-	if connectTimeout == 0 {
-		connectTimeout = time.Second
+	if dialTimeout == 0 {
+		dialTimeout = time.Second
 	}
 	queueSize := queueSizeTCP
 	if isUnixAddr(addr) {
@@ -83,7 +87,7 @@ func NewClient(addr string, commandTimeout, connectTimeout time.Duration) *Clien
 	c := &Client{
 		Addr:           addr,
 		commandTimeout: commandTimeout,
-		connectTimeout: connectTimeout,
+		dialTimeout:    dialTimeout,
 
 		connSem:       make(chan *redisConn, 1),
 		readQueue:     make(chan chan<- *bufio.Reader, queueSize),
@@ -103,7 +107,8 @@ type redisConn struct {
 	idle *bufio.Reader
 }
 
-// Close stops command submission with ErrClosed.
+// Close terminates the connection establishment.
+// Command submission is stopped with ErrClosed.
 // All pending commands are dealt with on return.
 // Calling Close more than once has no effect.
 func (c *Client) Close() error {
@@ -128,22 +133,22 @@ func (c *Client) Close() error {
 
 // connectOrClosed populates the connection semaphore.
 func (c *Client) connectOrClosed() {
-	var reconnectDelay time.Duration
+	var retryDelay time.Duration
 	for {
 		config := connConfig{
+			BufferSize:     conservativeMSS,
 			Addr:           c.Addr,
 			DB:             atomic.LoadInt64(&c.db),
 			CommandTimeout: c.commandTimeout,
-			ConnectTimeout: c.connectTimeout,
+			DialTimeout:    c.dialTimeout,
 		}
 		config.Password, _ = c.password.Load().([]byte)
 		conn, reader, err := connect(config)
 		if err != nil {
-			// closed loop protection
-			retry := time.NewTimer(reconnectDelay)
+			retry := time.NewTimer(retryDelay)
 
 			// remove previous connect error unless closed
-			if reconnectDelay != 0 {
+			if retryDelay != 0 {
 				current := <-c.connSem
 				if current.offline == ErrClosed {
 					c.connSem <- current // restore
@@ -154,18 +159,16 @@ func (c *Client) connectOrClosed() {
 			// propagate current connect error
 			c.connSem <- &redisConn{offline: fmt.Errorf("redis: offline due %w", err)}
 
-			// increase retry delay
-			reconnectDelay = 2*reconnectDelay + time.Millisecond
-			if reconnectDelay > time.Second/2 {
-				reconnectDelay = time.Second / 2
+			retryDelay = 2*retryDelay + time.Millisecond
+			if retryDelay > DialDelayMax {
+				retryDelay = DialDelayMax
 			}
-
 			<-retry.C
 			continue
 		}
 
 		// remove previous connect error unless closed
-		if reconnectDelay != 0 {
+		if retryDelay != 0 {
 			current := <-c.connSem
 			if current.offline == ErrClosed {
 				c.connSem <- current // restore
@@ -173,8 +176,6 @@ func (c *Client) connectOrClosed() {
 				return               // abandon
 			}
 		}
-
-		reconnectDelay = 0
 
 		// release
 		c.connSem <- &redisConn{Conn: conn, idle: reader}
@@ -455,13 +456,12 @@ func (c *Client) haltReceive(writeLock *redisConn) {
 }
 
 type connConfig struct {
-	Addr string
-	DB   int64
-
-	Password []byte
-
+	BufferSize     int
+	Addr           string
+	Password       []byte
+	DB             int64
 	CommandTimeout time.Duration
-	ConnectTimeout time.Duration
+	DialTimeout    time.Duration
 }
 
 func connect(c connConfig) (net.Conn, *bufio.Reader, error) {
@@ -469,7 +469,7 @@ func connect(c connConfig) (net.Conn, *bufio.Reader, error) {
 	if isUnixAddr(c.Addr) {
 		network = "unix"
 	}
-	conn, err := net.DialTimeout(network, c.Addr, c.ConnectTimeout)
+	conn, err := net.DialTimeout(network, c.Addr, c.DialTimeout)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -479,7 +479,7 @@ func connect(c connConfig) (net.Conn, *bufio.Reader, error) {
 		tcp.SetNoDelay(false)
 		tcp.SetLinger(0)
 	}
-	reader := bufio.NewReaderSize(conn, conservativeMSS)
+	reader := bufio.NewReaderSize(conn, c.BufferSize)
 
 	// apply sticky settings
 	if c.Password != nil {

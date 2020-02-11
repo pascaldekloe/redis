@@ -24,12 +24,12 @@ This is free and unencumbered software released into the
 ## Synchonous Command Execution
 
 ```go
-// Redis is a thread-safe client.
-var Redis = redis.NewClient("localhost", time.Second, time.Second)
+// Redis is a thread-safe connection establishment.
+var Redis = redis.NewClient("rds1.example.com", time.Second/2, 0)
 
 // Grow adds a string to a list.
 func Grow() {
-	newLen, err := Redis.RPUSHString("demo_list", "foo")
+	newLen, err := Redis.RPUSHString("demo_list", "hello")
 	if err != nil {
 		log.Print("demo_list update error: ", err)
 		return
@@ -49,34 +49,32 @@ func Ping() {
 ```
 
 
-## [Pub/Sub](https://redis.io/topics/pubsub) With Go Channels
+## Zero-Copy [Pub/Sub](https://redis.io/topics/pubsub) Reception
 
 ```go
-// RedisListener is a thread-safe registry.
-var RedisListener := Redis.NewListener()
+// RedisListener is a thread-safe connection establishment.
+var RedisListener = redis.NewListener(redis.ListenerConfig{
+	Func: func(channel string, message []byte, err error) {
+		switch err {
+		case nil:
+			log.Printf("received %q on %q", message, channel)
+		case redis.ErrClosed:
+			log.Print("subscription establishment terminated")
+		case io.ErrShortBuffer: // see ListenerConfig BufferSize
+			log.Printf("message on %q skipped due size", channel)
+		default:
+			log.Print("subscription error: ", err)
+			// recovery attempts follow automatically
+		}
+	},
+	Addr: "rds1.example.com:6379",
+})
 
-func main() {
-	time.AfterFunc(time.Minute, func() {
-		log.Print("shutdown")
-		RedisListener.Close()
-	})
-
-	for err := range RedisListener.Errs {
-		log.Print("subscription error: ", err)
-	}
-	log.Print("closed")
-}
-
-// Peek receives messages from a publish–subscribe channel.
+// Peek listens shortly to a publish–subscribe channel.
 func Peek() {
-	messages, UNSUBSCRIBE := RedisListener.SUBSCRIBE("demo_channel")
-
-	time.AfterFunc(10*time.Second, UNSUBSCRIBE)
-
-	for bytes := range messages {
-		log.Printf("got message %q", bytes)
-	}
-	log.Print("unsubscribed")
+	RedisListener.SUBSCRIBE("demo_channel")
+	time.Sleep(time.Second)
+	RedisListener.UNSUBSCRIBE("demo_channel")
 }
 ```
 

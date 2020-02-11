@@ -32,6 +32,38 @@ const (
 // header, minus a 32 byte TCP header (with timestamps).
 const conservativeMSS = 1208
 
+// ErrClosed signals end-of-life due a call to Close.
+var ErrClosed = errors.New("redis: connection establishment closed")
+
+// errProtocol signals invalid RESP reception.
+var errProtocol = errors.New("redis: protocol violation")
+
+// errNull represents a null reply. This case shoud be contained internally.
+// The API represents null with nil and ok booleans conform Go convention.
+var errNull = errors.New("redis: null")
+
+// errOK represents a simple string reply.
+var errOK = errors.New("redis: OK")
+
+// ServerError is a command response from Redis.
+type ServerError string
+
+// Error honors the error interface.
+func (e ServerError) Error() string {
+	return fmt.Sprintf("redis: server error %q", string(e))
+}
+
+// Prefix returns the first word, which represents the error kind.
+func (e ServerError) Prefix() string {
+	s := string(e)
+	for i, r := range s {
+		if r == ' ' {
+			return s[:i]
+		}
+	}
+	return s
+}
+
 func isUnixAddr(s string) bool {
 	return len(s) != 0 && s[0] == '/'
 }
@@ -52,25 +84,6 @@ func normalizeAddr(s string) string {
 		port = "6379"
 	}
 	return net.JoinHostPort(host, port)
-}
-
-// ServerError is a command response from Redis.
-type ServerError string
-
-// Error honors the error interface.
-func (e ServerError) Error() string {
-	return fmt.Sprintf("redis: server error %q", string(e))
-}
-
-// Prefix returns the first word, which represents the error kind.
-func (e ServerError) Prefix() string {
-	s := string(e)
-	for i, r := range s {
-		if r == ' ' {
-			return s[:i]
-		}
-	}
-	return s
 }
 
 // ParseInt assumes a valid decimal string—no validation.
@@ -99,12 +112,6 @@ func ParseInt(bytes []byte) int64 {
 	}
 	return value
 }
-
-// errProtocol signals invalid RESP reception.
-var errProtocol = errors.New("redis: protocol violation")
-
-// errNull represents a null reply.
-var errNull = errors.New("redis: null")
 
 func decodeOK(r *bufio.Reader) error {
 	line, err := readLF(r)
@@ -149,6 +156,31 @@ func decodeBlobString(r *bufio.Reader) (string, error) {
 	return readStringSize(r, l)
 }
 
+var errTokenDict = errors.New("unknown token")
+
+func decodeBlobToken(r *bufio.Reader, dict map[string]string) (string, error) {
+	l, err := readBlobLen(r)
+	if err != nil {
+		return "", err
+	}
+	slice, err := r.Peek(l)
+	if err != nil {
+		return "", err
+	}
+	// prevents malloc:
+	token, ok := dict[string(slice)]
+	if !ok {
+		token = string(slice)
+	}
+	if _, err := r.Discard(l + 2); err != nil {
+		return "", err
+	}
+	if !ok {
+		return token, errTokenDict
+	}
+	return token, nil
+}
+
 func decodeBytesArray(r *bufio.Reader) ([][]byte, error) {
 	l, err := readArrayLen(r)
 	if err != nil {
@@ -191,32 +223,6 @@ func decodeStringArray(r *bufio.Reader) ([]string, error) {
 	return array, nil
 }
 
-func decodePushArray(r *bufio.Reader) (pushType, dest string, message []byte, err error) {
-	l, err := readArrayLen(r)
-	if err != nil {
-		return "", "", nil, err
-	}
-	if l != 3 {
-		return "", "", nil, fmt.Errorf("%w; received a push array with %d elements", errProtocol, l)
-	}
-
-	pushType, err = decodeBlobString(r)
-	if err != nil {
-		return "", "", nil, err
-	}
-
-	dest, err = decodeBlobString(r)
-	if err != nil {
-		return "", "", nil, err
-	}
-	if pushType == "message" {
-		message, err = decodeBlobBytes(r)
-	} else {
-		_, err = decodeInteger(r)
-	}
-	return
-}
-
 func readLF(r *bufio.Reader) (line []byte, err error) {
 	line, err = r.ReadSlice('\n')
 	if err != nil {
@@ -228,7 +234,7 @@ func readLF(r *bufio.Reader) (line []byte, err error) {
 	return line, nil
 }
 
-func readBlobLen(r *bufio.Reader) (int64, error) {
+func readBlobLen(r *bufio.Reader) (int, error) {
 	line, err := readLF(r)
 	if err != nil {
 		return 0, err
@@ -238,7 +244,7 @@ func readBlobLen(r *bufio.Reader) (int64, error) {
 		l := ParseInt(line[1 : len(line)-2])
 		switch {
 		case l >= 0 && l <= SizeMax:
-			return l, nil
+			return int(l), nil
 		case l == -1:
 			return 0, errNull
 		}
@@ -273,17 +279,19 @@ func readError(r *bufio.Reader, line []byte, want string) error {
 		if l < 0 || l > SizeMax {
 			break
 		}
-		s, err := readStringSize(r, l)
+		s, err := readStringSize(r, int(l))
 		if err != nil {
 			return fmt.Errorf("%w; blob error unavailable", err)
 		}
 		return ServerError(s)
+	case len(line) == 5 && line[0] == '+' && line[1] == 'O' && line[2] == 'K':
+		return errOK
 	}
 
 	return fmt.Errorf("%w; %s expected–received %.40q", errProtocol, want, line)
 }
 
-func readBytesSize(r *bufio.Reader, size int64) ([]byte, error) {
+func readBytesSize(r *bufio.Reader, size int) ([]byte, error) {
 	blob := make([]byte, size)
 
 	// read payload
@@ -304,42 +312,36 @@ func readBytesSize(r *bufio.Reader, size int64) ([]byte, error) {
 	return blob, err
 }
 
-func readStringSize(r *bufio.Reader, size int64) (string, error) {
-	n := int(size)
-	bufSize := r.Size()
-	if n <= bufSize {
-		slice, err := r.Peek(n)
-		if err != nil {
-			return "", err
-		}
+func readStringSize(r *bufio.Reader, size int) (string, error) {
+	slice, err := r.Peek(size)
+	switch err {
+	case nil:
 		s := string(slice)
-		_, err = r.Discard(n + 2)
+		_, err = r.Discard(size + 2)
 		return s, err
+	case bufio.ErrBufferFull:
+		break // continue with Builder
+	default:
+		return "", err
 	}
 
 	var blob strings.Builder
-	blob.Grow(n)
+	blob.Grow(size)
+	blob.Write(slice)
 	for {
-		slice, err := r.Peek(bufSize)
-		if err != nil {
+		size -= len(slice)
+		slice, err = r.Peek(size)
+		blob.Write(slice)
+		switch err {
+		case nil:
+			_, err = r.Discard(size + 2) // skip CRLF
+			return blob.String(), err
+		case bufio.ErrBufferFull:
+			r.Discard(len(slice)) // guaranteed to succeed
+		default:
 			return "", err
 		}
-		blob.Write(slice)
-		r.Discard(bufSize) // guaranteed to succeed
-
-		n = blob.Cap() - blob.Len()
-		if n <= bufSize {
-			break
-		}
 	}
-
-	slice, err := r.Peek(n)
-	if err != nil {
-		return "", err
-	}
-	blob.Write(slice)
-	_, err = r.Discard(n + 2) // skip CRLF
-	return blob.String(), err
 }
 
 // errMapSlices rejects execution due malformed invocation.

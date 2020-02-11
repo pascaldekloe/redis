@@ -1,6 +1,7 @@
 package redis_test
 
 import (
+	"io"
 	"log"
 	"time"
 
@@ -9,8 +10,7 @@ import (
 
 func ExampleClient_SETStringWithOptions() {
 	// connection setup
-	var Redis = redis.NewClient("rds1.example.com", 5*time.Millisecond, time.Second)
-	// terminate after example
+	var Redis = redis.NewClient("rds1.example.com", time.Second/2, 0)
 	defer Redis.Close()
 
 	// execute command
@@ -19,7 +19,7 @@ func ExampleClient_SETStringWithOptions() {
 		Expire: time.Minute,
 	})
 	if err != nil {
-		log.Print("error: ", err)
+		log.Print("command error: ", err)
 		return
 	}
 
@@ -27,6 +27,31 @@ func ExampleClient_SETStringWithOptions() {
 	if ok {
 		log.Print("new string expires in a minute")
 	} else {
-		log.Print("left existing as is")
+		log.Print("left existing string as is")
 	}
+}
+
+func ExampleListener() {
+	// connection setup
+	var RedisListener = redis.NewListener(redis.ListenerConfig{
+		Func: func(channel string, message []byte, err error) {
+			switch err {
+			case nil:
+				log.Printf("received %q on %q", message, channel)
+			case redis.ErrClosed:
+				log.Print("subscription establishment terminated")
+			case io.ErrShortBuffer: // see ListenerConfig BufferSize
+				log.Printf("message on %q skipped due size", channel)
+			default:
+				log.Print("subscription error: ", err)
+				// recovery attempts follow automatically
+			}
+		},
+		Addr: "rds1.example.com:6379",
+	})
+	defer RedisListener.Close()
+
+	// listen quickly
+	RedisListener.SUBSCRIBE("demo_channel")
+	time.Sleep(time.Millisecond)
 }
