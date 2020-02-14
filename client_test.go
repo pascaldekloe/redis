@@ -326,7 +326,7 @@ func BenchmarkInteger(b *testing.B) {
 	})
 }
 
-func BenchmarkBulk(b *testing.B) {
+func BenchmarkBlob(b *testing.B) {
 	key := randomKey("bench")
 	defer func() {
 		if _, err := benchClient.DEL(key); err != nil {
