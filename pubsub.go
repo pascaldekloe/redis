@@ -53,9 +53,9 @@ type ListenerConfig struct {
 	// Optional AUTH [command] value applied to the connection.
 	Password []byte
 
-	// Limits the execution for AUTH, SUBSCRIBE, PSUBSCRIBE, UNSUBSCRIBE,
-	// PUNSUBSCRIBE, PING and QUIT execution. The network connection is
-	// closed upon expiry, which causes the automated reconnect attempts.
+	// Limits the execution time for AUTH, QUIT, SUBSCRIBE, PSUBSCRIBE,
+	// UNSUBSCRIBE, PUNSUBSCRIBE and PING. The network connection is closed
+	// upon expiry, which causes the automated reconnect attempts.
 	// Zero defaults to one second.
 	CommandTimeout time.Duration
 }
@@ -121,7 +121,7 @@ func (l *Listener) Close() error {
 	l.Unlock()
 
 	if conn != nil {
-		// try gracefull shutdown with QUIT command
+		// try graceful shutdown with QUIT command
 		req := newRequest("*1\r\n$4\r\nQUIT\r\n")
 		l.submit(conn, req)
 		// readLoop stops after OK response and

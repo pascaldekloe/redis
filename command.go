@@ -22,7 +22,9 @@ const (
 
 // SETOptions are extra arguments for the SET command.
 type SETOptions struct {
-	// Composotion of NX, XX, EX or PX.
+	// Composotion of NX, XX, EX or PX. The combinations
+	// (NX | XX) and (EX | PX) are rejected to prevent
+	// mistakes.
 	Flags uint
 
 	// The value is rounded to seconds with the EX flag,
@@ -65,8 +67,9 @@ func (o *SETOptions) args() (existArg, expireArg string, expire int64, err error
 }
 
 // AUTH executes <https://redis.io/commands/auth> in a persistent way, even when
-// the return is in error. Any following command execution runs on a connection
-// with password authentication. A nil value resets the password (to none).
+// the return is in error. Any following command executions apply to this
+// password authentication, reconnects included. A nil value resets the password
+// constraint (to none).
 func (c *Client) AUTH(password []byte) error {
 	c.password.Store(password)
 

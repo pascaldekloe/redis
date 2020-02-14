@@ -17,7 +17,7 @@ type listenerCall struct {
 	err     error
 }
 
-// newTestListener closes the channel upon ErrClosed, or test-timeout.
+// newTestListener closes the channel upon ErrClosed, or test-time-out.
 func newTestListener(t *testing.T) (*Listener, <-chan *listenerCall) {
 	record := make(chan *listenerCall, 99)
 	l := NewListener(ListenerConfig{

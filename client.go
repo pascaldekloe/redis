@@ -66,10 +66,10 @@ type Client struct {
 // absolute file path (e.g. "/var/run/redis.sock") for Unix
 // domain sockets.
 //
-// A command timeout limits the execution duration when nonzero. Expiry causes a
+// A command time-out limits execution duration when nonzero. Expiry causes a
 // reconnect (to prevent stale connections) and a net.Error with Timeout() true.
 //
-// The dial timeout limits the duration for network connection establishment.
+// The dial time-out limits the duration for network connection establishment.
 // Expiry causes an abort + retry. Zero defaults to one second. Any command
 // submission blocks on the first attempt. When connection establishment fails,
 // then command submission receives the error of the last attempt, until the
@@ -201,7 +201,7 @@ func (c *Client) submit(req *request) (*bufio.Reader, error) {
 		return nil, err
 	}
 
-	// apply timeout if set
+	// apply time-out if set
 	var deadline time.Time
 	if c.commandTimeout != 0 {
 		deadline = time.Now().Add(c.commandTimeout)
