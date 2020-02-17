@@ -17,6 +17,19 @@ type listenerCall struct {
 	err     error
 }
 
+func testListenerClose(t *testing.T, l *Listener, calls <-chan *listenerCall) {
+	if err := l.Close(); err != nil {
+		t.Error("Listener Close error:", err)
+	}
+	for call := range calls {
+		if call.err != nil {
+			t.Error("unexpected Listener error:", call.err)
+		} else {
+			t.Errorf("unexpected message %q on %q", call.message, call.channel)
+		}
+	}
+}
+
 // newTestListener closes the channel upon ErrClosed, or test-time-out.
 func newTestListener(t *testing.T) (*Listener, <-chan *listenerCall) {
 	record := make(chan *listenerCall, 99)
@@ -43,32 +56,19 @@ func newTestListener(t *testing.T) (*Listener, <-chan *listenerCall) {
 		for {
 			select {
 			case <-timeout.C:
-				t.Fatal("Listener recording time-out")
+				t.Error("Listener recording time-out")
+				return
+
 			case call := <-record:
 				if call.err == ErrClosed {
-					t.Log("Listener recording stop on ErrClosed")
-					go func() {
-						for call := range record {
-							if call.err != nil {
-								t.Error("Listener error after ErrClosed:", call.err)
-							} else {
-								t.Errorf("Listener message %q on %q after ErrClosed", call.message, call.channel)
-							}
-						}
-					}()
+					time.Sleep(10 * time.Millisecond)
+					if len(record) != 0 {
+						t.Errorf("got %d Listener invocations after ErrClosed", len(record))
+					}
 					return
 				}
 
-				select {
-				case <-timeout.C:
-					if call.err != nil {
-						t.Fatal("Unwanted Listener error:", call.err)
-					} else {
-						t.Fatalf("Unwanted Listener message %q on %q", call.message, call.channel)
-					}
-				case out <- call:
-					break
-				}
+				out <- call
 			}
 		}
 	}()
@@ -111,7 +111,7 @@ func TestSubscribe(t *testing.T) {
 	}()
 
 	l, calls := newTestListener(t)
-	defer l.Close()
+	defer testListenerClose(t, l, calls)
 
 	l.SUBSCRIBE(channel)
 	call1 := <-calls
@@ -131,8 +131,8 @@ func TestSubscribe(t *testing.T) {
 func TestUnsubscribe(t *testing.T) {
 	t.Parallel()
 
-	l, _ := newTestListener(t)
-	defer l.Close()
+	l, calls := newTestListener(t)
+	defer testListenerClose(t, l, calls)
 
 	channel := randomKey("channel")
 	l.SUBSCRIBE(channel)
@@ -153,8 +153,8 @@ func TestUnsubscribe(t *testing.T) {
 func TestUnsubscribeRace(t *testing.T) {
 	t.Parallel()
 
-	l, _ := newTestListener(t)
-	defer l.Close()
+	l, calls := newTestListener(t)
+	defer testListenerClose(t, l, calls)
 
 	channel := randomKey("channel")
 	l.SUBSCRIBE(channel)
@@ -174,8 +174,8 @@ func TestUnsubscribeRace(t *testing.T) {
 func TestSubscriptionConcurrency(t *testing.T) {
 	t.Parallel()
 
-	l, _ := newTestListener(t)
-	defer l.Close()
+	l, calls := newTestListener(t)
+	defer testListenerClose(t, l, calls)
 
 	channels := make([]string, 9)
 	for i := range channels {
@@ -204,7 +204,8 @@ func TestSubscriptionConcurrency(t *testing.T) {
 func TestListenerClose(t *testing.T) {
 	t.Parallel()
 
-	l, _ := newTestListener(t)
+	l, calls := newTestListener(t)
+	defer testListenerClose(t, l, calls)
 
 	channel1 := randomKey("channel")
 	channel2 := randomKey("channel")
@@ -238,7 +239,7 @@ func TestListenerBufferLimit(t *testing.T) {
 	t.Parallel()
 
 	l, calls := newTestListener(t)
-	defer l.Close()
+	defer testListenerClose(t, l, calls)
 
 	channel := randomKey("channel")
 	l.SUBSCRIBE(channel)
