@@ -411,7 +411,7 @@ func TestListAbsent(t *testing.T) {
 		t.Errorf("LLEN %q got %d, want 0 for non-existing", key, n)
 	}
 
-	const noSuchKey = `redis: server error "ERR no such key"`
+	const noSuchKey = `redis: error message "ERR no such key"`
 	if err := testClient.LSET(key, 1, nil); err == nil || err.Error() != noSuchKey {
 		t.Errorf(`LSET %q 1 "" got error %q, want %q`, key, err, noSuchKey)
 	}

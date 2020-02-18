@@ -2,6 +2,7 @@ package redis
 
 import (
 	"bufio"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -76,10 +77,9 @@ type Listener struct {
 	subs map[string]time.Time
 	// pending unsubscriptions with their submission moment
 	unsubs map[string]time.Time
-	// shutdown request flag with the submission moment
-	halt time.Time
-	// shutdown completion
-	closed chan struct{}
+
+	// shutdown signaling
+	quit, closed chan struct{}
 }
 
 // NewListener launches a managed connection.
@@ -88,6 +88,7 @@ func NewListener(config ListenerConfig) *Listener {
 		ListenerConfig: config,
 		subs:           make(map[string]time.Time),
 		unsubs:         make(map[string]time.Time),
+		quit:           make(chan struct{}),
 		closed:         make(chan struct{}),
 	}
 	// apply configuration defaults
@@ -112,21 +113,15 @@ func NewListener(config ListenerConfig) *Listener {
 // Calling Close more than once just blocks until the first call completed.
 func (l *Listener) Close() error {
 	l.Lock()
-	if l.halt.IsZero() {
-		l.halt = time.Now()
-		// monitorExpiry closes the net.Conn after CommandTimeout
+	select {
+	case <-l.quit:
+		break // already invoked
+	default:
+		close(l.quit)
+
 	}
-	conn := l.conn
 	l.conn = nil
 	l.Unlock()
-
-	if conn != nil {
-		// try graceful shutdown with QUIT command
-		req := newRequest("*1\r\n$4\r\nQUIT\r\n")
-		l.submit(conn, req)
-		// readLoop stops after OK response and
-		// connectLoop aborts on non-zero halt
-	}
 
 	// await shutdown
 	<-l.closed
@@ -144,11 +139,11 @@ func (l *Listener) connectLoop() {
 	var retryDelay time.Duration
 	for {
 		// l.conn is zero; check l.halt for shutdown requests
-		l.Lock()
-		halt := l.halt
-		l.Unlock()
-		if !halt.IsZero() {
+		select {
+		case <-l.quit:
 			return // accept shutdown
+		default:
+			break
 		}
 
 		conn, reader, err := connect(connConfig{
@@ -175,17 +170,7 @@ func (l *Listener) connectLoop() {
 		retryDelay = 0
 
 		if subscribed, ok := l.releaseConn(conn); ok {
-			if len(subscribed) > 0 {
-				// resubscribe
-				r := newRequestSize(1+len(subscribed), "\r\n$9\r\nSUBSCRIBE")
-				r.addStringList(subscribed)
-				l.submit(conn, r)
-			}
-
-			cancel := make(chan struct{})
-			go l.monitorExpiry(conn, cancel)
-			l.readLoop(reader)
-			close(cancel)
+			l.launchConn(conn, reader, subscribed...)
 
 			// retract after releaseConn
 			l.Lock()
@@ -200,8 +185,11 @@ func (l *Listener) releaseConn(conn net.Conn) (subscribed []string, ok bool) {
 	l.Lock()
 	defer l.Unlock()
 
-	if !l.halt.IsZero() {
+	select {
+	case <-l.quit:
 		return nil, false
+	default:
+		break
 	}
 
 	l.conn = conn
@@ -222,76 +210,167 @@ func (l *Listener) releaseConn(conn net.Conn) (subscribed []string, ok bool) {
 	return subscribed, true
 }
 
-var errPushArrayEmpty = errors.New("redis: got push array with 0 elements")
+var (
+	errQUITTimeout        = errors.New("redis: QUIT expired by timeout")
+	errSUBSCRIBETimeout   = errors.New("redis: SUBSCRIBE expired by timeout")
+	errUNSUBSCRIBETimeout = errors.New("redis: UNSUBSCRIBE expired by timeout")
+)
+
+func (l *Listener) launchConn(conn net.Conn, reader *bufio.Reader, channels ...string) {
+	// resubscribe if any
+	if len(channels) > 0 {
+		go func() {
+			req := newRequestSize(1+len(channels), "\r\n$9\r\nSUBSCRIBE")
+			req.addStringList(channels)
+			l.submit(conn, req)
+		}()
+	}
+
+	// read input
+	errChan := make(chan error, 1)
+	go func() {
+		errChan <- l.readLoop(reader)
+	}()
+
+	monitorInterval := l.CommandTimeout / 4
+	if monitorInterval < time.Millisecond {
+		monitorInterval = time.Millisecond
+	}
+	monitorTicker := time.NewTicker(monitorInterval)
+	defer monitorTicker.Stop()
+
+	for {
+		select {
+		case <-l.quit:
+			// try graceful shutdown with QUIT command
+			req := newRequest("*1\r\n$4\r\nQUIT\r\n")
+			l.submit(conn, req)
+
+			// Await read routine to stop, idealy by and EOF from QUIT.
+			conn.SetReadDeadline(time.Now().Add(l.CommandTimeout))
+			err := <-errChan
+			var e net.Error
+			switch {
+			case errors.Is(err, io.EOF):
+				break // correct QUIT result
+			case errors.As(err, &e) && e.Timeout():
+				l.Func("", nil, errQUITTimeout)
+			case err != nil:
+				l.Func("", nil, err)
+			}
+			return // accept shutdown
+
+		case err := <-errChan:
+			if !isClosed(err) {
+				l.Func("", nil, err)
+			} // else terminated by write error
+			return
+
+		case t := <-monitorTicker.C:
+			expire := t.Add(-l.CommandTimeout)
+
+			l.Lock()
+			for _, timestamp := range l.subs {
+				if !timestamp.IsZero() && timestamp.Before(expire) {
+					l.Func("", nil, errSUBSCRIBETimeout)
+					l.Unlock()
+					return // any error from read loop gets discarded
+				}
+			}
+			for _, timestamp := range l.unsubs {
+				if !timestamp.IsZero() && timestamp.Before(expire) {
+					l.Func("", nil, errUNSUBSCRIBETimeout)
+					l.Unlock()
+					return // any error from read loop gets discarded
+				}
+			}
+			l.Unlock()
+		}
+	}
+}
 
 func (l *Listener) readLoop(reader *bufio.Reader) error {
 	// confirmed state as message channel mapping
 	subscriptions := make(map[string]string)
 
 	for {
-		// receive push array
-		elementCount, err := readArrayLen(reader)
-		switch {
-		case err == nil:
-			break
-		case errors.Is(err, errOK):
-			continue // assume QUIT response
-		case errors.Is(err, io.EOF) || isClosed(err):
-			return nil
-		default:
-			return fmt.Errorf("redis: push array got %w", err)
-		}
-		if elementCount == 0 {
-			l.Func("", nil, errPushArrayEmpty)
-			continue
+		head, err := reader.Peek(16)
+		if len(head) != 16 {
+			return err
 		}
 
-		kindLen, err := readBlobLen(reader)
-		if err != nil {
-			return fmt.Errorf("redis: push kind length got %w", err)
-		}
-		// skip actual label; length is enough
-		if _, err := reader.Discard(kindLen + 2); err != nil {
-			return fmt.Errorf("redis: push kind string got %w", err)
-		}
+		head1 := binary.LittleEndian.Uint64(head)
+		head2 := binary.LittleEndian.Uint64(head[8:])
 		switch {
 		default:
-			return fmt.Errorf("redis: push array with %d elements and %d B kind label", elementCount, kindLen)
+			reader.Discard(16)
+			return readError(reader, head, "push array")
 
-		case kindLen == len("message") && elementCount == 3:
-			channel, err := decodeBlobToken(reader, subscriptions)
-			switch err {
-			case nil:
-				break
-			case errTokenDict:
-				return fmt.Errorf("redis: message for channel %q while not subscribed", channel)
-			default:
+		case head1 == '*'|'3'<<8|'\r'<<16|'\n'<<24|'$'<<32|'7'<<40|'\r'<<48|'\n'<<56 &&
+			head2 == 'm'|'e'<<8|'s'<<16|'s'<<24|'a'<<32|'g'<<40|'e'<<48|'\r'<<56:
+			_, err := reader.Discard(17)
+			if err != nil {
+				return err
+			}
+
+			line, err := readLine(reader)
+			if err != nil {
+				return err
+			}
+			if len(line) < 4 || line[0] != '$' {
+				return readError(reader, line, "push message channel")
+			}
+
+			// range protected by bufio.ErrBufferFull:
+			slice, err := reader.Peek(int(ParseInt(line[1 : len(line)-2])))
+			if err != nil {
 				return fmt.Errorf("redis: message channel got %w", err)
 			}
-
-			payloadLen, err := readBlobLen(reader)
+			channel, ok := subscriptions[string(slice)] // no malloc
+			if !ok {
+				return fmt.Errorf("redis: message for channel %q while not subscribed", slice)
+			}
+			_, err = reader.Discard(len(slice) + 2) // skip CRLF
 			if err != nil {
-				return fmt.Errorf("redis: message payload length got %w", err)
-			}
-			payloadSlice, err := reader.Peek(int(payloadLen))
-			switch err {
-			case nil:
-				l.Func(channel, payloadSlice, nil)
-			case bufio.ErrBufferFull:
-				l.Func(channel, nil, io.ErrShortBuffer)
-			default:
-				return fmt.Errorf("redis: message payload got %w", err)
-			}
-			if _, err := reader.Discard(int(payloadLen) + 2); err != nil {
-				return fmt.Errorf("redis: message payload got %w", err)
+				return fmt.Errorf("redis: message channel CRLF got %w", err)
 			}
 
-		case kindLen == len("subscribe") && elementCount == 3:
+			line, err = readLine(reader)
+			if err != nil {
+				return err
+			}
+			if len(line) < 4 || line[0] != '$' {
+				return readError(reader, line, "push message payload length")
+			}
+			payloadLen := ParseInt(line[1 : len(line)-2])
+			if payloadLen < 0 || payloadLen > int64(l.BufferSize) {
+				if payloadLen < 0 || payloadLen > SizeMax {
+					return fmt.Errorf("redis: message payload length got %.40q", line)
+				}
+				l.Func(channel, nil, io.ErrShortBuffer)
+			} else {
+				payloadSlice, err := reader.Peek(int(payloadLen))
+				if err != nil {
+					return err
+				}
+				l.Func(channel, payloadSlice, nil)
+			}
+			_, err = reader.Discard(int(payloadLen) + 2) // skip CRLF
+			if err != nil {
+				return fmt.Errorf("redis: message payload CRLF got %w", err)
+			}
+
+		case head1 == '*'|'3'<<8|'\r'<<16|'\n'<<24|'$'<<32|'9'<<40|'\r'<<48|'\n'<<56 &&
+			head2 == 's'|'u'<<8|'b'<<16|'s'<<24|'c'<<32|'r'<<40|'i'<<48|'b'<<56:
+			_, err := reader.Discard(19)
+			if err != nil {
+				return err
+			}
+
 			channel, err := decodeBlobString(reader)
 			if err != nil {
 				return fmt.Errorf("redis: subscribe channel got %w", err)
 			}
-
 			// subscription count is useless with concurrency
 			if _, err := decodeInteger(reader); err != nil {
 				return fmt.Errorf("redis: subscription count got %w", err)
@@ -303,20 +382,19 @@ func (l *Listener) readLoop(reader *bufio.Reader) error {
 			l.Unlock()
 			subscriptions[channel] = channel
 
-		case kindLen == len("unsubscribe") && elementCount == 3:
-			// skip actual kind label
-			if _, err := reader.Discard(13); err != nil {
-				return fmt.Errorf("redis: unsubscribe kind got %w", err)
+		case head1 == '*'|'3'<<8|'\r'<<16|'\n'<<24|'$'<<32|'1'<<40|'1'<<48|'\r'<<56 &&
+			head2 == '\n'|'u'<<8|'n'<<16|'s'<<24|'u'<<32|'b'<<40|'s'<<48|'c'<<56:
+			if _, err := reader.Discard(22); err != nil {
+				return err
 			}
 
-			channel, err := decodeBlobToken(reader, subscriptions)
-			if err != nil && err != errTokenDict {
+			channel, err := decodeBlobString(reader)
+			if err != nil {
 				return fmt.Errorf("redis: unsubscribe channel got %w", err)
 			}
-
 			// subscription count is useless with concurrency
 			if _, err := decodeInteger(reader); err != nil {
-				return fmt.Errorf("redis: subscription count got %w", err)
+				return fmt.Errorf("redis: unsubscription count got %w", err)
 			}
 
 			l.Lock()
@@ -324,56 +402,6 @@ func (l *Listener) readLoop(reader *bufio.Reader) error {
 			delete(l.unsubs, channel)
 			l.Unlock()
 			delete(subscriptions, channel)
-		}
-	}
-}
-
-var (
-	errQUITTimeout        = errors.New("redis: QUIT expired by timeout")
-	errSUBSCRIBETimeout   = errors.New("redis: SUBSCRIBE expired by timeout")
-	errUNSUBSCRIBETimeout = errors.New("redis: UNSUBSCRIBE expired by timeout")
-)
-
-func (l *Listener) monitorExpiry(conn net.Conn, cancel <-chan struct{}) {
-	interval := l.CommandTimeout / 4
-	if interval < time.Millisecond {
-		interval = time.Millisecond
-	}
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-cancel:
-			return
-
-		case t := <-ticker.C:
-			expire := t.Add(-l.CommandTimeout)
-
-			var timeout bool
-			l.Lock()
-			if !l.halt.IsZero() && l.halt.Before(expire) {
-				l.Func("", nil, errQUITTimeout)
-				timeout = true
-			}
-			for _, timestamp := range l.subs {
-				if !timestamp.IsZero() && timestamp.Before(expire) {
-					l.Func("", nil, errSUBSCRIBETimeout)
-					timeout = true
-				}
-			}
-			for _, timestamp := range l.unsubs {
-				if !timestamp.IsZero() && timestamp.Before(expire) {
-					l.Func("", nil, errUNSUBSCRIBETimeout)
-					timeout = true
-				}
-			}
-			l.Unlock()
-
-			if timeout {
-				conn.Close()
-				return
-			}
 		}
 	}
 }
