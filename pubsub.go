@@ -61,6 +61,22 @@ type ListenerConfig struct {
 	CommandTimeout time.Duration
 }
 
+func (c *ListenerConfig) clean() {
+	if c.BufferSize == 0 {
+		c.BufferSize = 32 * 1024
+	}
+	if c.BufferSize > SizeMax {
+		c.BufferSize = SizeMax
+	}
+	c.Addr = normalizeAddr(c.Addr)
+	if c.CommandTimeout == 0 {
+		c.CommandTimeout = time.Second
+	}
+	if c.DialTimeout == 0 {
+		c.DialTimeout = time.Second
+	}
+}
+
 // Listener manages a connection to a Redis node until Close. Broken connection
 // states cause automated reconnects, including resubscribes when applicable.
 //
@@ -84,25 +100,14 @@ type Listener struct {
 
 // NewListener launches a managed connection.
 func NewListener(config ListenerConfig) *Listener {
+	config.clean()
+
 	l := &Listener{
 		ListenerConfig: config,
 		subs:           make(map[string]time.Time),
 		unsubs:         make(map[string]time.Time),
 		quit:           make(chan struct{}),
 		closed:         make(chan struct{}),
-	}
-	// apply configuration defaults
-	if l.BufferSize == 0 {
-		l.BufferSize = 32 * 1024
-	}
-	if l.BufferSize > SizeMax {
-		l.BufferSize = SizeMax
-	}
-	if l.CommandTimeout == 0 {
-		l.CommandTimeout = time.Second
-	}
-	if l.DialTimeout == 0 {
-		l.DialTimeout = time.Second
 	}
 
 	// launch connection management
