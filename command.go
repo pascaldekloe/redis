@@ -27,8 +27,8 @@ type SETOptions struct {
 	// mistakes.
 	Flags uint
 
-	// The value is rounded to seconds with the EX flag,
-	// and milliseconds with PX. Non-zero values without
+	// The value is truncated to seconds with the EX flag,
+	// or milliseconds with PX. Non-zero values without any
 	// expiry Flags are rejected to prevent mistakes.
 	Expire time.Duration
 }
