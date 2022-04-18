@@ -37,8 +37,8 @@ type ListenerConfig struct {
 
 	// Upper boundary for the number of bytes in a message payload.
 	// Larger messages are skipped with an io.ErrShortBuffer to Func.
-	// Zero defaults to 64 KiB. Values larger than SizeMax have no
-	// effect.
+	// Zero defaults to 32 KiB. Values larger than SizeMax are capped
+	// to SizeMax.
 	BufferSize int
 
 	// The host defaults to localhost, and the port defaults to 6379.
@@ -93,7 +93,10 @@ func NewListener(config ListenerConfig) *Listener {
 	}
 	// apply configuration defaults
 	if l.BufferSize == 0 {
-		l.BufferSize = 1 << 16
+		l.BufferSize = 32 * 1024
+	}
+	if l.BufferSize > SizeMax {
+		l.BufferSize = SizeMax
 	}
 	if l.CommandTimeout == 0 {
 		l.CommandTimeout = time.Second
