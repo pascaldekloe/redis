@@ -66,7 +66,7 @@ type ListenerConfig struct {
 //
 // Multiple goroutines may invoke methods on a Listener simultaneously.
 type Listener struct {
-	sync.Mutex
+	mutex sync.Mutex
 
 	ListenerConfig // read-only attributes
 
@@ -112,7 +112,7 @@ func NewListener(config ListenerConfig) *Listener {
 // with ErrClosed before return, and after the network connection was closed.
 // Calling Close more than once just blocks until the first call completed.
 func (l *Listener) Close() error {
-	l.Lock()
+	l.mutex.Lock()
 	select {
 	case <-l.quit:
 		break // already invoked
@@ -121,7 +121,7 @@ func (l *Listener) Close() error {
 
 	}
 	l.conn = nil
-	l.Unlock()
+	l.mutex.Unlock()
 
 	// await shutdown
 	<-l.closed
@@ -173,17 +173,17 @@ func (l *Listener) connectLoop() {
 			l.launchConn(conn, reader, subscribed...)
 
 			// retract after releaseConn
-			l.Lock()
+			l.mutex.Lock()
 			l.conn = nil
-			l.Unlock()
+			l.mutex.Unlock()
 		}
 		conn.Close()
 	}
 }
 
 func (l *Listener) releaseConn(conn net.Conn) (subscribed []string, ok bool) {
-	l.Lock()
-	defer l.Unlock()
+	l.mutex.Lock()
+	defer l.mutex.Unlock()
 
 	select {
 	case <-l.quit:
@@ -269,22 +269,22 @@ func (l *Listener) launchConn(conn net.Conn, reader *bufio.Reader, channels ...s
 		case t := <-monitorTicker.C:
 			expire := t.Add(-l.CommandTimeout)
 
-			l.Lock()
+			l.mutex.Lock()
 			for _, timestamp := range l.subs {
 				if !timestamp.IsZero() && timestamp.Before(expire) {
 					l.Func("", nil, errSUBSCRIBETimeout)
-					l.Unlock()
+					l.mutex.Unlock()
 					return // any error from read loop gets discarded
 				}
 			}
 			for _, timestamp := range l.unsubs {
 				if !timestamp.IsZero() && timestamp.Before(expire) {
 					l.Func("", nil, errUNSUBSCRIBETimeout)
-					l.Unlock()
+					l.mutex.Unlock()
 					return // any error from read loop gets discarded
 				}
 			}
-			l.Unlock()
+			l.mutex.Unlock()
 		}
 	}
 }
@@ -376,10 +376,10 @@ func (l *Listener) readLoop(reader *bufio.Reader) error {
 				return fmt.Errorf("redis: subscription count got %w", err)
 			}
 
-			l.Lock()
+			l.mutex.Lock()
 			// zero submission timestamp stops expiry check
 			l.subs[channel] = time.Time{}
-			l.Unlock()
+			l.mutex.Unlock()
 			subscriptions[channel] = channel
 
 		case head1 == '*'|'3'<<8|'\r'<<16|'\n'<<24|'$'<<32|'1'<<40|'1'<<48|'\r'<<56 &&
@@ -397,10 +397,10 @@ func (l *Listener) readLoop(reader *bufio.Reader) error {
 				return fmt.Errorf("redis: unsubscription count got %w", err)
 			}
 
-			l.Lock()
+			l.mutex.Lock()
 			delete(l.subs, channel)
 			delete(l.unsubs, channel)
-			l.Unlock()
+			l.mutex.Unlock()
 			delete(subscriptions, channel)
 		}
 	}
@@ -427,7 +427,7 @@ func (l *Listener) submit(conn net.Conn, req *request) {
 func (l *Listener) SUBSCRIBE(channels ...string) {
 	var todo []string
 
-	l.Lock()
+	l.mutex.Lock()
 	now := time.Now()
 	for _, name := range channels {
 		if _, ok := l.subs[name]; !ok {
@@ -440,7 +440,7 @@ func (l *Listener) SUBSCRIBE(channels ...string) {
 		}
 	}
 	conn := l.conn
-	l.Unlock()
+	l.mutex.Unlock()
 
 	if conn != nil && len(todo) != 0 {
 		r := newRequestSize(len(todo)+1, "\r\n$9\r\nSUBSCRIBE")
@@ -460,7 +460,7 @@ func (l *Listener) SUBSCRIBE(channels ...string) {
 func (l *Listener) UNSUBSCRIBE(channels ...string) {
 	var todo []string
 
-	l.Lock()
+	l.mutex.Lock()
 	now := time.Now()
 	for _, name := range channels {
 		if _, ok := l.unsubs[name]; !ok {
@@ -469,7 +469,7 @@ func (l *Listener) UNSUBSCRIBE(channels ...string) {
 		}
 	}
 	conn := l.conn
-	l.Unlock()
+	l.mutex.Unlock()
 
 	if conn != nil && (len(todo) != 0 || len(channels) == 0) {
 		r := newRequestSize(len(todo)+1, "\r\n$11\r\nUNSUBSCRIBE")
