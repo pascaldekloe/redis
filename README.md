@@ -1,4 +1,4 @@
-[![API Documentation](https://godoc.org/github.com/pascaldekloe/redis?status.svg)](https://godoc.org/github.com/pascaldekloe/redis)
+[![Go Reference](https://pkg.go.dev/badge/github.com/pascaldekloe/redis.svg)](https://pkg.go.dev/github.com/pascaldekloe/redis)
 [![Build Status](https://github.com/pascaldekloe/redis/actions/workflows/go.yml/badge.svg)](https://github.com/pascaldekloe/redis/actions/workflows/go.yml)
 [![Code Report](https://goreportcard.com/badge/github.com/pascaldekloe/redis)](https://goreportcard.com/report/github.com/pascaldekloe/redis)
 
