@@ -1,7 +1,3 @@
-[![Go Reference](https://pkg.go.dev/badge/github.com/pascaldekloe/redis.svg)](https://pkg.go.dev/github.com/pascaldekloe/redis)
-[![Build Status](https://github.com/pascaldekloe/redis/actions/workflows/go.yml/badge.svg)](https://github.com/pascaldekloe/redis/actions/workflows/go.yml)
-[![Code Report](https://goreportcard.com/badge/github.com/pascaldekloe/redis)](https://goreportcard.com/report/github.com/pascaldekloe/redis)
-
 ## About
 
 … a [Redis](https://redis.io/topics/introduction) client for the Go programming
@@ -19,6 +15,9 @@ There is no internal error reporting/logging by design.
 
 This is free and unencumbered software released into the
 [public domain](https://creativecommons.org/publicdomain/zero/1.0).
+
+[![Go Reference](https://pkg.go.dev/badge/github.com/pascaldekloe/redis.svg)](https://pkg.go.dev/github.com/pascaldekloe/redis)
+[![Build Status](https://github.com/pascaldekloe/redis/actions/workflows/go.yml/badge.svg)](https://github.com/pascaldekloe/redis/actions/workflows/go.yml)
 
 
 ## Synchonous Command Execution
