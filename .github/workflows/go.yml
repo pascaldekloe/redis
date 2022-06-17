@@ -9,9 +9,11 @@ on:
 jobs:
 
   build:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     strategy:
       matrix
+        os:
+        - 'ubuntu-latest'
         redis:
         - 'latest'
         - '6.0'
