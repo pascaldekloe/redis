@@ -10,6 +10,14 @@ jobs:
 
   build:
     runs-on: ubuntu-latest
+    strategy:
+      matrix
+        redis:
+        - 'latest'
+        - '6.0'
+        - '5.0'
+        - '4.0'
+    name: server ${{ matrix.redis }}
     steps:
     - uses: actions/checkout@v3
 
@@ -20,6 +28,12 @@ jobs:
 
     - name: Build
       run: go build -v ./cmd/...
+
+    - name: Setup Redis server
+      uses: shogo82148/actions-setup-redis@v1
+      with:
+        redis-version: ${{ matrix.redis }}
+        auto-start: "true"
 
     - name: Test
       run: go test -v ./...
