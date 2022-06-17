@@ -6,6 +6,9 @@ on:
   pull_request:
     branches: [ "master" ]
 
+env:
+  TEST_REDIS_ADDR: 'localhost'
+
 jobs:
 
   build:
