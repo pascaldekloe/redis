@@ -168,19 +168,19 @@ func TestWriteError(t *testing.T) {
 // Note that testClient must recover for the next test to pass.
 func TestReadError(t *testing.T) {
 	timeout := time.After(time.Second)
+
+	// break connection
 	select {
 	case conn := <-testClient.connSem:
-		c, ok := conn.Conn.(interface{ CloseRead() error })
-		if ok {
-			c.CloseRead()
-		}
+		conn.Conn.Close()
 
+		// replace with closed pipe
+		c, _ := net.Pipe()
+		c.Close()
+		conn.Conn = c
 		select {
 		case testClient.connSem <- conn:
-			if !ok {
-				t.Skip("no CloseRead method on connection")
-			}
-
+			break // write unlocked
 		case <-timeout:
 			t.Fatal("connection sempahore release timeout")
 		}
@@ -189,8 +189,8 @@ func TestReadError(t *testing.T) {
 	}
 
 	_, err := testClient.DEL("key")
-	if !errors.Is(err, io.EOF) {
-		t.Errorf("got error %v, want a EOF", err)
+	if !errors.Is(err, io.ErrClosedPipe) {
+		t.Errorf("DEL got error %q, want %q", err, io.ErrClosedPipe)
 	}
 }
 
