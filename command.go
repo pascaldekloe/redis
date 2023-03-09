@@ -66,28 +66,14 @@ func (o *SETOptions) args() (existArg, expireArg string, expire int64, err error
 	return
 }
 
-// AUTH executes <https://redis.io/commands/auth> in a persistent way, even when
-// the return is in error. Any following command executions apply to this
-// password authentication, reconnects included. A nil value resets the password
-// constraint (to none).
-func (c *Client) AUTH(password []byte) error {
-	c.password.Store(password)
-
-	var r *request
-	if password == nil {
-		r = newRequest("*1\r\n$4\r\nQUIT\r\n")
-	} else {
-		r = newRequest("*2\r\n$4\r\nAUTH\r\n$")
-		r.addBytes(password)
-	}
-	return c.commandOKAndReconnect(r)
-}
-
 // SELECT executes <https://redis.io/commands/select> in a persistent way, even
 // when the return is in error. Any following command executions apply to this
 // database selection, reconnects included.
+//
+// Deprecated: Use ClientConfig.DB instead. The SELECT method has unintuitive
+// behaviour on error scenario.
 func (c *Client) SELECT(db int64) error {
-	atomic.StoreInt64(&c.db, db)
+	atomic.StoreInt64(&c.config.DB, db)
 	r := newRequest("*2\r\n$6\r\nSELECT\r\n$")
 	r.addDecimal(db)
 	return c.commandOKOrReconnect(r)

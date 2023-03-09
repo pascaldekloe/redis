@@ -154,13 +154,13 @@ func (l *Listener) connectLoop() {
 			break
 		}
 
-		conn, reader, err := connect(connConfig{
-			BufferSize:     l.BufferSize,
+		config := ClientConfig{
 			Addr:           normalizeAddr(l.Addr),
 			DialTimeout:    l.DialTimeout,
 			CommandTimeout: l.CommandTimeout,
 			Password:       l.Password,
-		})
+		}
+		conn, reader, err := config.connect(l.BufferSize)
 		if err != nil {
 			retry := time.NewTimer(retryDelay)
 

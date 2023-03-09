@@ -24,6 +24,37 @@ const (
 // ErrConnLost signals connection loss on pending request.
 var errConnLost = errors.New("redis: connection lost while awaiting response")
 
+// ClientConfig defines a Client setup.
+type ClientConfig struct {
+	// The host defaults to localhost, and the port defaults to 6379.
+	// Thus, the empty string defaults to "localhost:6379". Use an
+	// absolute file path (e.g. "/var/run/redis.sock") for Unix
+	// domain sockets.
+	Addr string
+
+	// Limit execution duration when nonzero. Expiry causes a reconnect (to
+	// prevent stale connections) and a net.Error with Timeout() true.
+	CommandTimeout time.Duration
+
+	// Limit the duration for network connection establishment. Expiry
+	// causes an abort plus retry. Zero defaults to one second. Any command
+	// submission blocks during the first attempt. When the connect fails,
+	// then command submission receives the error of the last attempt, until
+	// the connection restores.
+	DialTimeout time.Duration
+
+	// AUTH when not nil.
+	Password []byte
+
+	// SELECT when not zero.
+	DB int64
+}
+
+// NewClient launches a managed connection to a node (address).
+func (c *ClientConfig) NewClient() *Client {
+	return newClient(*c)
+}
+
 // Client manages a connection to a Redis node until Close. Broken connection
 // states cause automated reconnects.
 //
@@ -33,19 +64,9 @@ type Client struct {
 	// Normalized node address in use. This field is read-only.
 	Addr string
 
+	config ClientConfig
+
 	noCopy noCopy
-
-	// sticky AUTH(entication)
-	password atomic.Value
-
-	// sticky database SELECT
-	db int64
-
-	// optional execution expiry
-	commandTimeout time.Duration
-
-	// network establishment expiry
-	dialTimeout time.Duration
 
 	// The connection semaphore is used as a write lock.
 	connSem chan *redisConn
@@ -78,19 +99,27 @@ type Client struct {
 // then command submission receives the error of the last attempt, until the
 // connection restores.
 func NewClient(addr string, commandTimeout, dialTimeout time.Duration) *Client {
-	addr = normalizeAddr(addr)
-	if dialTimeout == 0 {
-		dialTimeout = time.Second
+	return newClient(ClientConfig{
+		Addr:           addr,
+		CommandTimeout: commandTimeout,
+		DialTimeout:    dialTimeout,
+	})
+}
+
+func newClient(config ClientConfig) *Client {
+	config.Addr = normalizeAddr(config.Addr)
+	if config.DialTimeout == 0 {
+		config.DialTimeout = time.Second
 	}
+
 	queueSize := queueSizeTCP
-	if isUnixAddr(addr) {
+	if isUnixAddr(config.Addr) {
 		queueSize = queueSizeUnix
 	}
 
 	c := &Client{
-		Addr:           addr,
-		commandTimeout: commandTimeout,
-		dialTimeout:    dialTimeout,
+		Addr:   config.Addr, // decouple
+		config: config,
 
 		connSem:   make(chan *redisConn, 1),
 		readQueue: make(chan chan<- *bufio.Reader, queueSize),
@@ -142,15 +171,7 @@ func (c *Client) Close() error {
 func (c *Client) connectOrClosed() {
 	var retryDelay time.Duration
 	for {
-		config := connConfig{
-			BufferSize:     conservativeMSS,
-			Addr:           c.Addr,
-			DB:             atomic.LoadInt64(&c.db),
-			CommandTimeout: c.commandTimeout,
-			DialTimeout:    c.dialTimeout,
-		}
-		config.Password, _ = c.password.Load().([]byte)
-		conn, reader, err := connect(config)
+		conn, reader, err := c.config.connect(conservativeMSS)
 		if err != nil {
 			retry := time.NewTimer(retryDelay)
 
@@ -215,8 +236,8 @@ func (c *Client) exchange(req *request) (*bufio.Reader, error) {
 
 	// apply time-out if set
 	var deadline time.Time
-	if c.commandTimeout != 0 {
-		deadline = time.Now().Add(c.commandTimeout)
+	if c.config.CommandTimeout != 0 {
+		deadline = time.Now().Add(c.config.CommandTimeout)
 		conn.SetWriteDeadline(deadline)
 	}
 
@@ -288,16 +309,6 @@ func (c *Client) commandOKOrReconnect(req *request) error {
 	} else {
 		c.passRead(r, nil)
 	}
-	return err
-}
-
-func (c *Client) commandOKAndReconnect(req *request) error {
-	r, err := c.exchange(req)
-	if err != nil {
-		return err
-	}
-	err = decodeOK(r)
-	c.dropConnFromRead()
 	return err
 }
 
@@ -444,16 +455,7 @@ func (c *Client) dropConnFromRead() {
 	}
 }
 
-type connConfig struct {
-	BufferSize     int
-	Addr           string
-	Password       []byte
-	DB             int64
-	CommandTimeout time.Duration
-	DialTimeout    time.Duration
-}
-
-func connect(c connConfig) (net.Conn, *bufio.Reader, error) {
+func (c *ClientConfig) connect(readBufferSize int) (net.Conn, *bufio.Reader, error) {
 	network := "tcp"
 	if isUnixAddr(c.Addr) {
 		network = "unix"
@@ -468,7 +470,7 @@ func connect(c connConfig) (net.Conn, *bufio.Reader, error) {
 		tcp.SetNoDelay(false)
 		tcp.SetLinger(0)
 	}
-	reader := bufio.NewReaderSize(conn, c.BufferSize)
+	reader := bufio.NewReaderSize(conn, readBufferSize)
 
 	// apply sticky settings
 	if c.Password != nil {
@@ -491,10 +493,10 @@ func connect(c connConfig) (net.Conn, *bufio.Reader, error) {
 		}
 	}
 
-	if c.DB != 0 {
+	if DB := atomic.LoadInt64(&c.DB); DB != 0 {
 		req := newRequest("*2\r\n$6\r\nSELECT\r\n$")
 		defer req.free()
-		req.addDecimal(c.DB)
+		req.addDecimal(DB)
 
 		if c.CommandTimeout != 0 {
 			conn.SetDeadline(time.Now().Add(c.CommandTimeout))

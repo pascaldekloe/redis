@@ -7,15 +7,6 @@ import (
 	"time"
 )
 
-func TestAUTHReset(t *testing.T) {
-	if err := testClient.AUTH(nil); err != nil {
-		t.Error("AUTH nil got error:", err)
-	}
-	if err := testClient.AUTH(password); err != nil {
-		t.Error("AUTH recover got error:", err)
-	}
-}
-
 func TestDBSwitch(t *testing.T) {
 	key, value := randomKey("test-key"), "✓"
 
