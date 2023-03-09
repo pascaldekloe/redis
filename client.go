@@ -54,10 +54,12 @@ type Client struct {
 	// a redisConn is used to read the response. Requests enqueue a callback
 	// channel to parse the response in pipeline order. A nil Reader receive
 	// implies connection loss.
+	// Insertion must hold the write lock (connSem).
 	readQueue chan chan<- *bufio.Reader
 
 	// A send/receive halts the read routine. The bufio.Reader is discarded.
 	// No more consumption on ReadQueue.
+	// Insertion must hold the write lock (connSem).
 	readTerm chan struct{}
 }
 
@@ -116,15 +118,19 @@ func (c *Client) Close() error {
 	conn := <-c.connSem // lock write
 	if conn.offline == ErrClosed {
 		// redundant invocation
-		c.connSem <- conn // restore
+		c.connSem <- conn // unlock write
 		return nil
+	}
+
+	if conn.offline == nil && conn.idle == nil {
+		// must hold write lock for insertion:
+		c.readTerm <- struct{}{}
+		// race unlikely yet possible
+		c.cancelQueue()
 	}
 
 	// stop command submission (unlocks write)
 	c.connSem <- &redisConn{offline: ErrClosed}
-
-	c.haltRead(conn)
-	c.cancelQueueWithWriteLocked()
 
 	if conn.Conn != nil {
 		return conn.Close()
@@ -184,10 +190,15 @@ func (c *Client) connectOrClosed() {
 	}
 }
 
-func (c *Client) cancelQueueWithWriteLocked() {
-	for n := len(c.readQueue); n > 0; n-- {
-		// signal connection loss
-		(<-c.readQueue) <- (*bufio.Reader)(nil)
+func (c *Client) cancelQueue() {
+	for {
+		select {
+		case ch := <-c.readQueue:
+			// signal connection loss
+			ch <- (*bufio.Reader)(nil)
+		default:
+			return
+		}
 	}
 }
 
@@ -211,10 +222,14 @@ func (c *Client) exchange(req *request) (*bufio.Reader, error) {
 
 	// send command
 	if _, err := conn.Write(req.buf); err != nil {
-		// write remains locked
+		// write remains locked (until connectOrClosed)
 		go func() {
-			c.haltRead(conn)
-			c.cancelQueueWithWriteLocked()
+			if conn.idle == nil {
+				// read routine running
+				// must hold write lock for insertion:
+				c.readTerm <- struct{}{}
+				c.cancelQueue()
+			}
 			conn.Close()
 			c.connectOrClosed()
 		}()
@@ -229,6 +244,7 @@ func (c *Client) exchange(req *request) (*bufio.Reader, error) {
 		req.free()
 	} else {
 		// read routine is running; wait in line
+		// must hold write lock for insertion:
 		c.readQueue <- req.receive
 	}
 
@@ -368,7 +384,6 @@ func (c *Client) passRead(r *bufio.Reader, err error) {
 	case next := <-c.readQueue:
 		next <- r // direct pass
 		return
-
 	default:
 		break
 	}
@@ -402,7 +417,8 @@ func (c *Client) dropConnFromRead() {
 	for {
 		select {
 		case <-c.readTerm:
-			return // accept (redundant) halt
+			// accept halt; let sender drop conn
+			return
 
 		// A write (lock owner) blocks on a full queue,
 		// so include discard here to prevent deadlock.
@@ -413,49 +429,17 @@ func (c *Client) dropConnFromRead() {
 		case conn := <-c.connSem:
 			// write locked
 			if conn.offline != nil {
-				if conn.offline == ErrClosed {
-					// confirm by accept
-					<-c.readTerm
-				}
-				c.connSem <- conn // restore
+				c.connSem <- conn // unlock write
 			} else {
-				// write remains locked
+				// write remains locked (until connectOrClosed)
 				go func() {
 					conn.Close()
-					c.cancelQueueWithWriteLocked()
+					c.cancelQueue()
 					c.connectOrClosed()
 				}()
 			}
 
 			return
-		}
-	}
-}
-
-func (c *Client) haltRead(writeLock *redisConn) {
-	if writeLock.offline != nil || writeLock.idle != nil {
-		// read routine not running
-		return
-	}
-	// Read routine needs the write lock to idle.
-
-	readHandover := make(chan *bufio.Reader)
-	select {
-	case c.readTerm <- struct{}{}:
-		// The read routine accepted the halt,
-		// while awaiting the write lock.
-		break
-
-	case c.readQueue <- readHandover:
-		select {
-		case c.readTerm <- struct{}{}:
-			// The read routine accepted the halt,
-			// while awaiting the write lock.
-			break
-
-		case <-readHandover:
-			// All reads are done. We have the read lock.
-			break
 		}
 	}
 }
