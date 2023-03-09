@@ -44,15 +44,12 @@ DESCRIPTION
 		os.Exit(1)
 	}
 
-	Redis = redis.NewClient(*addrFlag, 0, 0)
-	defer Redis.Close()
+	config := redis.ClientConfig{Addr: *addrFlag}
 	if *authFlag {
-		password, _ := ioutil.ReadAll(os.Stdin)
-		if err := Redis.AUTH(password); err != nil {
-			fmt.Fprintln(os.Stderr, "reget: AUTH with", err)
-			os.Exit(4)
-		}
+		config.Password, _ = ioutil.ReadAll(os.Stdin)
 	}
+	Redis = config.NewClient()
+	defer Redis.Close()
 
 	print(keys)
 }
