@@ -497,13 +497,16 @@ func connect(c connConfig) (net.Conn, *bufio.Reader, error) {
 			defer conn.SetDeadline(time.Time{})
 		}
 		_, err := conn.Write(req.buf)
+		// ⚠️ reverse/delayed error check
 		if err == nil {
 			err = decodeOK(reader)
 		}
 		if err != nil {
-			return nil, nil, fmt.Errorf("redis: AUTH with %w", err)
+			conn.Close()
+			return nil, nil, fmt.Errorf("redis: AUTH on new connection: %w", err)
 		}
 	}
+
 	if c.DB != 0 {
 		req := newRequest("*2\r\n$6\r\nSELECT\r\n$")
 		defer req.free()
@@ -514,11 +517,13 @@ func connect(c connConfig) (net.Conn, *bufio.Reader, error) {
 			defer conn.SetDeadline(time.Time{})
 		}
 		_, err := conn.Write(req.buf)
+		// ⚠️ reverse/delayed error check
 		if err == nil {
 			err = decodeOK(reader)
 		}
 		if err != nil {
-			return nil, nil, fmt.Errorf("redis: SELECT with %w", err)
+			conn.Close()
+			return nil, nil, fmt.Errorf("redis: SELECT on new connection: %w", err)
 		}
 	}
 
