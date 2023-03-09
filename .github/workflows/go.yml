@@ -7,38 +7,37 @@ on:
     branches: [ "master" ]
 
 env:
-  TEST_REDIS_ADDR: 'localhost'
+  TEST_REDIS_ADDR: 'redis:6379'
 
 jobs:
-
   build:
-    runs-on: ${{ matrix.os }}
+    runs-on: 'ubuntu-latest'
+    container: ${{ matrix.container }}
+
     strategy:
       matrix:
-        os:
-        - 'ubuntu-latest'
-        redis:
-        - 'latest'
-        - '6.0'
-        - '5.0'
-        - '4.0'
-    name: server ${{ matrix.redis }}
+        container:
+        - 'golang:1.13'
+        service:
+        - 'redis:5'
+        - 'redis:6'
+        - 'redis:7'
+
+    services:
+      redis:
+        image: ${{ matrix.service }}
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     steps:
-    - uses: actions/checkout@v3
+      - name: Check out repository code
+        uses: actions/checkout@v3
 
-    - name: Set up Go
-      uses: actions/setup-go@v3
-      with:
-        go-version: 1.18
+      - name: Build
+        run: go build -v ./cmd/...
 
-    - name: Build
-      run: go build -v ./cmd/...
-
-    - name: Setup Redis server
-      uses: shogo82148/actions-setup-redis@v1
-      with:
-        redis-version: ${{ matrix.redis }}
-        auto-start: "true"
-
-    - name: Test
-      run: go test -v ./...
+      - name: Test
+        run: go test -v ./...
