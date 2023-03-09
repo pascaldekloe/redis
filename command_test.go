@@ -26,8 +26,8 @@ func TestDBSwitch(t *testing.T) {
 	} else if bytes != nil {
 		t.Errorf("GET %q in DB 13 got %q, want nil", key, bytes)
 	}
-	if err := testClient.FLUSHDB(true); err != nil {
-		t.Error("FLUSHDB ASYNC error:", err)
+	if err := testClient.FLUSHDB(false); err != nil {
+		t.Error("FLUSHDB error:", err)
 	}
 
 	if err := testClient.SELECT(14); err != nil {
