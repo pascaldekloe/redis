@@ -22,7 +22,7 @@ jobs:
         - 'redis:5'
         - 'redis:6'
         - 'redis:7'
-        - 'docker.dragonflydb.io/dragonflydb/dragonfly'
+        - 'docker.dragonflydb.io/dragonflydb/dragonfly:v0.17.0'
 
     services:
       redis:
