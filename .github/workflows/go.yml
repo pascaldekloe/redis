@@ -17,7 +17,7 @@ jobs:
     strategy:
       matrix:
         container:
-        - 'golang:1.20'
+        - 'golang:1.20-alpine'
         service:
         - 'redis:5'
         - 'redis:6'
