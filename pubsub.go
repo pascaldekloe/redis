@@ -47,21 +47,24 @@ type ListenerConfig struct {
 	// domain sockets.
 	Addr string
 
-	// Upper boundary for network connection establishment. See the
-	// net.Dialer Timeout for details. Zero defaults to one second.
-	DialTimeout time.Duration
-
-	// Optional AUTH [command] value applied to the connection.
-	Password []byte
-
 	// Limits the execution time for AUTH, QUIT, SUBSCRIBE, PSUBSCRIBE,
 	// UNSUBSCRIBE, PUNSUBSCRIBE and PING. The network connection is closed
 	// upon expiry, which causes the automated reconnect attempts.
 	// Zero defaults to one second.
 	CommandTimeout time.Duration
+
+	// Upper boundary for network connection establishment. See the
+	// net.Dialer Timeout for details. Zero defaults to one second.
+	DialTimeout time.Duration
+
+	// AUTH when not nil.
+	Password []byte
 }
 
-func (c *ListenerConfig) clean() {
+func (c *ListenerConfig) normalize() {
+	if c.Func == nil {
+		panic("redis: missing callback function")
+	}
 	if c.BufferSize == 0 {
 		c.BufferSize = 32 * 1024
 	}
@@ -89,9 +92,12 @@ type Listener struct {
 	// current connection, which may be nil when offline
 	conn net.Conn
 
-	// requested subscription state with their submission moment
+	// Subs maps SUBSCRIBE patterns to their request timestamp.
+	// The timestamp is zeroed once the server confirmed subscription.
 	subs map[string]time.Time
-	// pending unsubscriptions with their submission moment
+
+	// Unsubs maps UNSUBSCRIBE patterns to their request timestamp.
+	// Entries are removed once confirmed.
 	unsubs map[string]time.Time
 
 	// shutdown signaling
@@ -100,7 +106,7 @@ type Listener struct {
 
 // NewListener launches a managed connection.
 func NewListener(config ListenerConfig) *Listener {
-	config.clean()
+	config.normalize()
 
 	l := &Listener{
 		ListenerConfig: config,
@@ -131,7 +137,7 @@ func (l *Listener) Close() error {
 	l.conn = nil
 	l.mutex.Unlock()
 
-	// await shutdown
+	// await completion
 	<-l.closed
 	return nil
 }
@@ -140,7 +146,7 @@ func (l *Listener) connectLoop() {
 	defer func() {
 		// confirmed shutdown
 		l.Func("", nil, ErrClosed)
-		// Close awaits ErrClosed propagation
+		// Close awaits complition
 		close(l.closed)
 	}()
 
@@ -155,9 +161,9 @@ func (l *Listener) connectLoop() {
 		}
 
 		config := ClientConfig{
-			Addr:           normalizeAddr(l.Addr),
-			DialTimeout:    l.DialTimeout,
+			Addr:           l.Addr,
 			CommandTimeout: l.CommandTimeout,
+			DialTimeout:    l.DialTimeout,
 			Password:       l.Password,
 		}
 		conn, reader, err := config.connect(l.BufferSize)
@@ -165,7 +171,7 @@ func (l *Listener) connectLoop() {
 			retry := time.NewTimer(retryDelay)
 
 			// propagate error
-			l.Func("", nil, fmt.Errorf("redis: listener offline due %w", err))
+			l.Func("", nil, fmt.Errorf("redis: listener offline: %w", err))
 
 			retryDelay = 2*retryDelay + time.Millisecond
 			if retryDelay > DialDelayMax {
@@ -177,45 +183,41 @@ func (l *Listener) connectLoop() {
 		// connect success
 		retryDelay = 0
 
-		if subscribed, ok := l.releaseConn(conn); ok {
-			l.launchConn(conn, reader, subscribed...)
-
-			// retract after releaseConn
-			l.mutex.Lock()
-			l.conn = nil
-			l.mutex.Unlock()
+		subs := l.releaseConn(conn)
+		if len(subs) != 0 {
+			go func(conn net.Conn) {
+				req := newRequestSize(1+len(subs), "\r\n$9\r\nSUBSCRIBE")
+				req.addStringList(subs)
+				l.submit(conn, req)
+			}(conn)
 		}
+		l.manageConn(conn, reader)
+		l.mutex.Lock()
+		l.conn = nil
+		l.mutex.Unlock()
 		conn.Close()
 	}
 }
 
-func (l *Listener) releaseConn(conn net.Conn) (subscribed []string, ok bool) {
+func (l *Listener) releaseConn(conn net.Conn) (subs []string) {
 	l.mutex.Lock()
 	defer l.mutex.Unlock()
 
-	select {
-	case <-l.quit:
-		return nil, false
-	default:
-		break
-	}
-
 	l.conn = conn
 
-	// apply pendig unsubscribes
+	// clear pendig unsubscribes
 	for name := range l.unsubs {
 		delete(l.unsubs, name)
 		delete(l.subs, name)
 	}
 
-	// collect subscription state
-	now := time.Now()
+	// init subscription requests
+	reqTime := time.Now()
 	for name := range l.subs {
-		l.subs[name] = now // reset timestamp
-		subscribed = append(subscribed, name)
+		l.subs[name] = reqTime
+		subs = append(subs, name)
 	}
-
-	return subscribed, true
+	return
 }
 
 var (
@@ -224,16 +226,7 @@ var (
 	errUNSUBSCRIBETimeout = errors.New("redis: UNSUBSCRIBE expired by timeout")
 )
 
-func (l *Listener) launchConn(conn net.Conn, reader *bufio.Reader, channels ...string) {
-	// resubscribe if any
-	if len(channels) > 0 {
-		go func() {
-			req := newRequestSize(1+len(channels), "\r\n$9\r\nSUBSCRIBE")
-			req.addStringList(channels)
-			l.submit(conn, req)
-		}()
-	}
-
+func (l *Listener) manageConn(conn net.Conn, reader *bufio.Reader) {
 	// read input
 	errChan := make(chan error, 1)
 	go func() {
@@ -299,11 +292,11 @@ func (l *Listener) launchConn(conn net.Conn, reader *bufio.Reader, channels ...s
 
 func (l *Listener) readLoop(reader *bufio.Reader) error {
 	// confirmed state as message channel mapping
-	subscriptions := make(map[string]string)
+	confirmedSubs := make(map[string]string)
 
 	for {
 		head, err := reader.Peek(16)
-		if len(head) != 16 {
+		if err != nil {
 			return err
 		}
 
@@ -318,98 +311,102 @@ func (l *Listener) readLoop(reader *bufio.Reader) error {
 			head2 == 'm'|'e'<<8|'s'<<16|'s'<<24|'a'<<32|'g'<<40|'e'<<48|'\r'<<56:
 			_, err := reader.Discard(17)
 			if err != nil {
-				return err
+				return fmt.Errorf("redis: message array-replay: %w", err)
 			}
 
+			// parse channel
 			line, err := readLine(reader)
 			if err != nil {
-				return err
+				return fmt.Errorf("redis: message array-replay channel-size: %w", err)
 			}
 			if len(line) < 4 || line[0] != '$' {
-				return readError(reader, line, "push message channel")
+				return readError(reader, line, "message array-replay channel-size")
 			}
-
-			// range protected by bufio.ErrBufferFull:
-			slice, err := reader.Peek(int(ParseInt(line[1 : len(line)-2])))
+			channelSize := ParseInt(line[1 : len(line)-2])
+			if channelSize < 0 || channelSize > SizeMax {
+				return fmt.Errorf("redis: message array-replay channel-size %.40q", line)
+			}
+			channelSlice, err := reader.Peek(int(channelSize))
 			if err != nil {
-				return fmt.Errorf("redis: message channel got %w", err)
+				return fmt.Errorf("redis: message array-replay channel: %w", err)
 			}
-			channel, ok := subscriptions[string(slice)] // no malloc
+			channel, ok := confirmedSubs[string(channelSlice)] // no malloc
 			if !ok {
-				return fmt.Errorf("redis: message for channel %q while not subscribed", slice)
+				// fishy, yet it could happen with engines like DragonflyDB
+				channel = string(channelSlice) // malloc
 			}
-			_, err = reader.Discard(len(slice) + 2) // skip CRLF
+			_, err = reader.Discard(len(channelSlice) + 2) // skip CRLF
 			if err != nil {
-				return fmt.Errorf("redis: message channel CRLF got %w", err)
+				return fmt.Errorf("redis: message array-replay channel-CRLF: %w", err)
 			}
 
+			// parse payload
 			line, err = readLine(reader)
 			if err != nil {
 				return err
 			}
 			if len(line) < 4 || line[0] != '$' {
-				return readError(reader, line, "push message payload length")
+				return readError(reader, line, "message array-replay payload-size")
 			}
-			payloadLen := ParseInt(line[1 : len(line)-2])
-			if payloadLen < 0 || payloadLen > int64(l.BufferSize) {
-				if payloadLen < 0 || payloadLen > SizeMax {
-					return fmt.Errorf("redis: message payload length got %.40q", line)
-				}
+			payloadSize := ParseInt(line[1 : len(line)-2])
+			if payloadSize < 0 || payloadSize > SizeMax {
+				return fmt.Errorf("redis: message array-replay payload-size %.40q", line)
+			}
+			if payloadSize > int64(l.BufferSize) {
 				l.Func(channel, nil, io.ErrShortBuffer)
 			} else {
-				payloadSlice, err := reader.Peek(int(payloadLen))
+				payloadSlice, err := reader.Peek(int(payloadSize))
 				if err != nil {
-					return err
+					return fmt.Errorf("redis: message array-replay payload: %w", err)
 				}
 				l.Func(channel, payloadSlice, nil)
 			}
-			_, err = reader.Discard(int(payloadLen) + 2) // skip CRLF
+			_, err = reader.Discard(int(payloadSize) + 2) // skip CRLF
 			if err != nil {
-				return fmt.Errorf("redis: message payload CRLF got %w", err)
+				return fmt.Errorf("redis: message array-replay payload-CRLF: %w", err)
 			}
 
 		case head1 == '*'|'3'<<8|'\r'<<16|'\n'<<24|'$'<<32|'9'<<40|'\r'<<48|'\n'<<56 &&
 			head2 == 's'|'u'<<8|'b'<<16|'s'<<24|'c'<<32|'r'<<40|'i'<<48|'b'<<56:
 			_, err := reader.Discard(19)
 			if err != nil {
-				return err
+				return fmt.Errorf("redis: subscribe array-replay: %w", err)
 			}
 
 			channel, err := decodeBlobString(reader)
 			if err != nil {
-				return fmt.Errorf("redis: subscribe channel got %w", err)
+				return fmt.Errorf("redis: subscribe array-replay channel: %w", err)
 			}
 			// subscription count is useless with concurrency
 			if _, err := decodeInteger(reader); err != nil {
-				return fmt.Errorf("redis: subscription count got %w", err)
+				return fmt.Errorf("redis: subscribe array-replay count: %w", err)
 			}
 
 			l.mutex.Lock()
-			// zero submission timestamp stops expiry check
 			l.subs[channel] = time.Time{}
 			l.mutex.Unlock()
-			subscriptions[channel] = channel
+			confirmedSubs[channel] = channel
 
 		case head1 == '*'|'3'<<8|'\r'<<16|'\n'<<24|'$'<<32|'1'<<40|'1'<<48|'\r'<<56 &&
 			head2 == '\n'|'u'<<8|'n'<<16|'s'<<24|'u'<<32|'b'<<40|'s'<<48|'c'<<56:
 			if _, err := reader.Discard(22); err != nil {
-				return err
+				return fmt.Errorf("redis: unsubscribe array-replay: %w", err)
 			}
 
 			channel, err := decodeBlobString(reader)
 			if err != nil {
-				return fmt.Errorf("redis: unsubscribe channel got %w", err)
+				return fmt.Errorf("redis: unsubscribe array-replay channel: %w", err)
 			}
 			// subscription count is useless with concurrency
 			if _, err := decodeInteger(reader); err != nil {
-				return fmt.Errorf("redis: unsubscription count got %w", err)
+				return fmt.Errorf("redis: unsubscribe array-replay count: %w", err)
 			}
 
 			l.mutex.Lock()
 			delete(l.subs, channel)
 			delete(l.unsubs, channel)
 			l.mutex.Unlock()
-			delete(subscriptions, channel)
+			delete(confirmedSubs, channel)
 		}
 	}
 }
@@ -434,18 +431,18 @@ func (l *Listener) submit(conn net.Conn, req *request) {
 // Invocation with zero arguments has no effect.
 func (l *Listener) SUBSCRIBE(channels ...string) {
 	var todo []string
-
 	l.mutex.Lock()
-	now := time.Now()
-	for _, name := range channels {
-		if _, ok := l.subs[name]; !ok {
-			if len(name) > SizeMax {
-				go l.Func(name, nil, fmt.Errorf("%w; %d byte channel name %.40q…", errProtocol, len(name), name))
-				continue
-			}
-			l.subs[name] = now
-			todo = append(todo, name)
+	reqTime := time.Now()
+	for _, s := range channels {
+		if len(s) > SizeMax {
+			go l.Func(s, nil, fmt.Errorf("%d-byte subscribe channel dropped", len(s)))
+			continue
 		}
+		if _, ok := l.subs[s]; ok {
+			continue // redundant
+		}
+		l.subs[s] = reqTime
+		todo = append(todo, s)
 	}
 	conn := l.conn
 	l.mutex.Unlock()
@@ -455,8 +452,6 @@ func (l *Listener) SUBSCRIBE(channels ...string) {
 		r.addStringList(todo)
 		l.submit(conn, r)
 	}
-
-	return
 }
 
 // UNSUBSCRIBE executes <https://redis.io/commands/unsubscribe> in a persistent
@@ -469,12 +464,17 @@ func (l *Listener) UNSUBSCRIBE(channels ...string) {
 	var todo []string
 
 	l.mutex.Lock()
-	now := time.Now()
-	for _, name := range channels {
-		if _, ok := l.unsubs[name]; !ok {
-			l.unsubs[name] = now
-			todo = append(todo, name)
+	reqTime := time.Now()
+	for _, s := range channels {
+		if len(s) > SizeMax {
+			go l.Func(s, nil, fmt.Errorf("%d-byte unsubscribe channel dropped", len(s)))
+			continue
 		}
+		if _, ok := l.unsubs[s]; ok {
+			continue // redundant
+		}
+		l.unsubs[s] = reqTime
+		todo = append(todo, s)
 	}
 	conn := l.conn
 	l.mutex.Unlock()
