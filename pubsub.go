@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"strings"
 	"sync"
 	"time"
 )
@@ -262,7 +261,7 @@ func (l *Listener) manageConn(conn net.Conn, reader *bufio.Reader) {
 			return // accept shutdown
 
 		case err := <-errChan:
-			if !isClosed(err) {
+			if !errors.Is(err, net.ErrClosed) {
 				l.Func("", nil, err)
 			} // else terminated by write error
 			return
@@ -418,7 +417,7 @@ func (l *Listener) submit(conn net.Conn, req *request) {
 	_, err := conn.Write(req.buf)
 	if err != nil {
 		conn.Close()
-		if !isClosed(err) {
+		if !errors.Is(err, net.ErrClosed) {
 			l.Func("", nil, err)
 		}
 	}
@@ -484,10 +483,4 @@ func (l *Listener) UNSUBSCRIBE(channels ...string) {
 		r.addStringList(todo)
 		l.submit(conn, r)
 	}
-}
-
-// isClosed works around https://github.com/golang/go/issues/4373 🤬
-func isClosed(err error) bool {
-	e := new(*net.OpError)
-	return errors.As(err, e) && strings.Contains((*e).Err.Error(), "use of closed network connection")
 }
