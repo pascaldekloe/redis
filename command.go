@@ -122,7 +122,7 @@ func (c *Client) FLUSHALL(async bool) error {
 func (c *Client) GET(key string) (value []byte, err error) {
 	r := newRequest("*2\r\n$3\r\nGET\r\n$")
 	r.addString(key)
-	return c.commandBlobBytes(r)
+	return c.commandBulkBytes(r)
 }
 
 // GETString executes <https://redis.io/commands/get>.
@@ -130,7 +130,7 @@ func (c *Client) GET(key string) (value []byte, err error) {
 func (c *Client) GETString(key string) (value string, ok bool, err error) {
 	r := newRequest("*2\r\n$3\r\nGET\r\n$")
 	r.addString(key)
-	return c.commandBlobString(r)
+	return c.commandBulkString(r)
 }
 
 // BytesGET executes <https://redis.io/commands/get>.
@@ -138,7 +138,7 @@ func (c *Client) GETString(key string) (value string, ok bool, err error) {
 func (c *Client) BytesGET(key []byte) (value []byte, err error) {
 	r := newRequest("*2\r\n$3\r\nGET\r\n$")
 	r.addBytes(key)
-	return c.commandBlobBytes(r)
+	return c.commandBulkBytes(r)
 }
 
 // MGET executes <https://redis.io/commands/mget>.
@@ -379,14 +379,14 @@ func (c *Client) BytesSTRLEN(key []byte) (int64, error) {
 func (c *Client) GETRANGE(key string, start, end int64) ([]byte, error) {
 	r := newRequest("*4\r\n$8\r\nGETRANGE\r\n$")
 	r.addStringIntInt(key, start, end)
-	return c.commandBlobBytes(r)
+	return c.commandBulkBytes(r)
 }
 
 // GETRANGEString executes <https://redis.io/commands/getrange>.
 func (c *Client) GETRANGEString(key string, start, end int64) (string, error) {
 	r := newRequest("*4\r\n$8\r\nGETRANGE\r\n$")
 	r.addStringIntInt(key, start, end)
-	s, _, err := c.commandBlobString(r)
+	s, _, err := c.commandBulkString(r)
 	return s, err
 }
 
@@ -394,7 +394,7 @@ func (c *Client) GETRANGEString(key string, start, end int64) (string, error) {
 func (c *Client) BytesGETRANGE(key []byte, start, end int64) ([]byte, error) {
 	r := newRequest("*4\r\n$8\r\nGETRANGE\r\n$")
 	r.addBytesIntInt(key, start, end)
-	return c.commandBlobBytes(r)
+	return c.commandBulkBytes(r)
 }
 
 // APPEND executes <https://redis.io/commands/append>.
@@ -440,7 +440,7 @@ func (c *Client) BytesLLEN(key []byte) (int64, error) {
 func (c *Client) LINDEX(key string, index int64) (value []byte, err error) {
 	r := newRequest("*3\r\n$6\r\nLINDEX\r\n$")
 	r.addStringInt(key, index)
-	return c.commandBlobBytes(r)
+	return c.commandBulkBytes(r)
 }
 
 // LINDEXString executes <https://redis.io/commands/lindex>.
@@ -449,7 +449,7 @@ func (c *Client) LINDEX(key string, index int64) (value []byte, err error) {
 func (c *Client) LINDEXString(key string, index int64) (value string, ok bool, err error) {
 	r := newRequest("*3\r\n$6\r\nLINDEX\r\n$")
 	r.addStringInt(key, index)
-	return c.commandBlobString(r)
+	return c.commandBulkString(r)
 }
 
 // BytesLINDEX executes <https://redis.io/commands/lindex>.
@@ -458,7 +458,7 @@ func (c *Client) LINDEXString(key string, index int64) (value string, ok bool, e
 func (c *Client) BytesLINDEX(key []byte, index int64) (value []byte, err error) {
 	r := newRequest("*3\r\n$6\r\nLINDEX\r\n$")
 	r.addBytesInt(key, index)
-	return c.commandBlobBytes(r)
+	return c.commandBulkBytes(r)
 }
 
 // LRANGE executes <https://redis.io/commands/lrange>.
@@ -490,7 +490,7 @@ func (c *Client) BytesLRANGE(key []byte, start, stop int64) (values [][]byte, er
 func (c *Client) LPOP(key string) (value []byte, err error) {
 	r := newRequest("*2\r\n$4\r\nLPOP\r\n$")
 	r.addString(key)
-	return c.commandBlobBytes(r)
+	return c.commandBulkBytes(r)
 }
 
 // LPOPString executes <https://redis.io/commands/lpop>.
@@ -498,7 +498,7 @@ func (c *Client) LPOP(key string) (value []byte, err error) {
 func (c *Client) LPOPString(key string) (value string, ok bool, err error) {
 	r := newRequest("*2\r\n$4\r\nLPOP\r\n$")
 	r.addString(key)
-	return c.commandBlobString(r)
+	return c.commandBulkString(r)
 }
 
 // BytesLPOP executes <https://redis.io/commands/lpop>.
@@ -506,7 +506,7 @@ func (c *Client) LPOPString(key string) (value string, ok bool, err error) {
 func (c *Client) BytesLPOP(key []byte) (value []byte, err error) {
 	r := newRequest("*2\r\n$4\r\nLPOP\r\n$")
 	r.addBytes(key)
-	return c.commandBlobBytes(r)
+	return c.commandBulkBytes(r)
 }
 
 // RPOP executes <https://redis.io/commands/rpop>.
@@ -514,7 +514,7 @@ func (c *Client) BytesLPOP(key []byte) (value []byte, err error) {
 func (c *Client) RPOP(key string) (value []byte, err error) {
 	r := newRequest("*2\r\n$4\r\nRPOP\r\n$")
 	r.addString(key)
-	return c.commandBlobBytes(r)
+	return c.commandBulkBytes(r)
 }
 
 // RPOPString executes <https://redis.io/commands/rpop>.
@@ -522,7 +522,7 @@ func (c *Client) RPOP(key string) (value []byte, err error) {
 func (c *Client) RPOPString(key string) (value string, ok bool, err error) {
 	r := newRequest("*2\r\n$4\r\nRPOP\r\n$")
 	r.addString(key)
-	return c.commandBlobString(r)
+	return c.commandBulkString(r)
 }
 
 // BytesRPOP executes <https://redis.io/commands/rpop>.
@@ -530,7 +530,7 @@ func (c *Client) RPOPString(key string) (value string, ok bool, err error) {
 func (c *Client) BytesRPOP(key []byte) (value []byte, err error) {
 	r := newRequest("*2\r\n$4\r\nRPOP\r\n$")
 	r.addBytes(key)
-	return c.commandBlobBytes(r)
+	return c.commandBulkBytes(r)
 }
 
 // LTRIM executes <https://redis.io/commands/ltrim>.
@@ -615,7 +615,7 @@ func (c *Client) RPUSHString(key, value string) (newLen int64, err error) {
 func (c *Client) HGET(key, field string) (value []byte, err error) {
 	r := newRequest("*3\r\n$4\r\nHGET\r\n$")
 	r.addStringString(key, field)
-	return c.commandBlobBytes(r)
+	return c.commandBulkBytes(r)
 }
 
 // HGETString executes <https://redis.io/commands/hget>.
@@ -623,7 +623,7 @@ func (c *Client) HGET(key, field string) (value []byte, err error) {
 func (c *Client) HGETString(key, field string) (value string, ok bool, err error) {
 	r := newRequest("*3\r\n$4\r\nHGET\r\n$")
 	r.addStringString(key, field)
-	return c.commandBlobString(r)
+	return c.commandBulkString(r)
 }
 
 // BytesHGET executes <https://redis.io/commands/hget>.
@@ -631,7 +631,7 @@ func (c *Client) HGETString(key, field string) (value string, ok bool, err error
 func (c *Client) BytesHGET(key, field []byte) (value []byte, err error) {
 	r := newRequest("*3\r\n$4\r\nHGET\r\n$")
 	r.addBytesBytes(key, field)
-	return c.commandBlobBytes(r)
+	return c.commandBulkBytes(r)
 }
 
 // HSET executes <https://redis.io/commands/hset>.

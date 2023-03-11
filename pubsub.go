@@ -316,12 +316,12 @@ func (l *Listener) readLoop(reader *bufio.Reader) error {
 				return fmt.Errorf("redis: subscribe array-reply: %w", err)
 			}
 
-			channel, err := decodeBlobString(reader)
+			channel, err := readBulkString(reader)
 			if err != nil {
 				return fmt.Errorf("redis: subscribe array-reply channel: %w", err)
 			}
 			// subscription count is useless with concurrency
-			if _, err := decodeInteger(reader); err != nil {
+			if _, err := readInteger(reader); err != nil {
 				return fmt.Errorf("redis: subscribe array-reply count: %w", err)
 			}
 
@@ -336,12 +336,12 @@ func (l *Listener) readLoop(reader *bufio.Reader) error {
 				return fmt.Errorf("redis: unsubscribe array-reply: %w", err)
 			}
 
-			channel, err := decodeBlobString(reader)
+			channel, err := readBulkString(reader)
 			if err != nil {
 				return fmt.Errorf("redis: unsubscribe array-reply channel: %w", err)
 			}
 			// subscription count is useless with concurrency
-			if _, err := decodeInteger(reader); err != nil {
+			if _, err := readInteger(reader); err != nil {
 				return fmt.Errorf("redis: unsubscribe array-reply count: %w", err)
 			}
 

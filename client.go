@@ -293,7 +293,7 @@ func (c *Client) commandOK(req *request) error {
 	if err != nil {
 		return err
 	}
-	err = decodeOK(r)
+	err = readOK(r)
 	c.passRead(r, err)
 	return err
 }
@@ -303,7 +303,7 @@ func (c *Client) commandOKOrReconnect(req *request) error {
 	if err != nil {
 		return err
 	}
-	err = decodeOK(r)
+	err = readOK(r)
 	if err != nil {
 		c.dropConnFromRead()
 	} else {
@@ -317,17 +317,17 @@ func (c *Client) commandInteger(req *request) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	integer, err := decodeInteger(r)
+	integer, err := readInteger(r)
 	c.passRead(r, err)
 	return integer, err
 }
 
-func (c *Client) commandBlobBytes(req *request) ([]byte, error) {
+func (c *Client) commandBulkBytes(req *request) ([]byte, error) {
 	r, err := c.exchange(req)
 	if err != nil {
 		return nil, err
 	}
-	bytes, err := decodeBlobBytes(r)
+	bytes, err := readBulkBytes(r)
 	c.passRead(r, err)
 	if err == errNull {
 		return nil, nil
@@ -335,12 +335,12 @@ func (c *Client) commandBlobBytes(req *request) ([]byte, error) {
 	return bytes, err
 }
 
-func (c *Client) commandBlobString(req *request) (string, bool, error) {
+func (c *Client) commandBulkString(req *request) (string, bool, error) {
 	r, err := c.exchange(req)
 	if err != nil {
 		return "", false, err
 	}
-	s, err := decodeBlobString(r)
+	s, err := readBulkString(r)
 	c.passRead(r, err)
 	if err == errNull {
 		return "", false, nil
@@ -353,7 +353,7 @@ func (c *Client) commandBytesArray(req *request) ([][]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	array, err := decodeBytesArray(r)
+	array, err := readBytesArray(r)
 	c.passRead(r, err)
 	if err == errNull {
 		return nil, nil
@@ -366,7 +366,7 @@ func (c *Client) commandStringArray(req *request) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	array, err := decodeStringArray(r)
+	array, err := readStringArray(r)
 	c.passRead(r, err)
 	if err == errNull {
 		return nil, nil
@@ -485,7 +485,7 @@ func (c *ClientConfig) connect(readBufferSize int) (net.Conn, *bufio.Reader, err
 		_, err := conn.Write(req.buf)
 		// ⚠️ reverse/delayed error check
 		if err == nil {
-			err = decodeOK(reader)
+			err = readOK(reader)
 		}
 		if err != nil {
 			conn.Close()
@@ -505,7 +505,7 @@ func (c *ClientConfig) connect(readBufferSize int) (net.Conn, *bufio.Reader, err
 		_, err := conn.Write(req.buf)
 		// ⚠️ reverse/delayed error check
 		if err == nil {
-			err = decodeOK(reader)
+			err = readOK(reader)
 		}
 		if err != nil {
 			conn.Close()

@@ -7,10 +7,10 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"path/filepath"
 	"strconv"
-	"strings"
 	"sync"
 )
 
@@ -111,122 +111,86 @@ func ParseInt(bytes []byte) int64 {
 	return v
 }
 
-func decodeOK(r *bufio.Reader) error {
+func readOK(r *bufio.Reader) error {
 	line, err := readLine(r)
-	switch {
-	case err != nil:
+	if err != nil {
 		return err
-	case len(line) == 5:
+	}
+	if len(line) == 5 {
 		u := binary.LittleEndian.Uint32(line)
 		if u == '+'|'O'<<8|'K'<<16|'\r'<<24 {
 			return nil
 		}
-		// obsolete with RESP3
 		if u == '$'|'-'<<8|'1'<<16|'\r'<<24 {
 			return errNull
 		}
-	case len(line) == 3 && line[0] == '_' && line[1] == '\r':
-		return errNull
 	}
-	return readError(r, line, "OK")
+	if len(line) > 3 && line[0] == '-' {
+		return ServerError(line[1 : len(line)-2])
+	}
+	return fmt.Errorf("%w; received %.40q for OK", errProtocol, line)
 }
 
-func decodeInteger(r *bufio.Reader) (int64, error) {
+func readInteger(r *bufio.Reader) (int64, error) {
 	line, err := readLine(r)
 	switch {
 	case err != nil:
 		return 0, err
 	case len(line) > 3 && line[0] == ':':
 		return ParseInt(line[1 : len(line)-2]), nil
+	case len(line) > 3 && line[0] == '-':
+		return 0, ServerError(line[1 : len(line)-2])
 	default:
-		return 0, readError(r, line, "integer")
+		return 0, fmt.Errorf("%w; received %.40q for integer", errProtocol, line)
 	}
 }
 
-func decodeBlobBytes(r *bufio.Reader) (blob []byte, err error) {
-	line, err := readLine(r)
+func readBulkBytes(r *bufio.Reader) ([]byte, error) {
+	size, err := readBulkSize(r)
 	if err != nil {
 		return nil, err
 	}
-	if len(line) < 4 || line[0] != '$' {
-		if len(line) == 3 && line[0] == '_' {
-			return nil, errNull
-		}
-		return nil, readError(r, line, "blob")
-	}
-
-	switch l := ParseInt(line[1 : len(line)-2]); {
-	case l >= 0 && l <= SizeMax:
-		blob = make([]byte, l)
-	case l == -1:
-		// obsolete with RESP3
-		return nil, errNull
-	default:
-		return nil, readError(r, line, "blob")
-	}
-
-	done, err := r.Read(blob)
-	for done < len(blob) && err == nil {
-		var n int
-		n, err = r.Read(blob[done:])
-		done += n
-	}
+	bytes := make([]byte, size)
+	_, err = io.ReadFull(r, bytes)
 	if err == nil {
 		_, err = r.Discard(2) // skip CRLF
 	}
-	return blob, err
+	return bytes, err
 }
 
-func decodeBlobString(r *bufio.Reader) (string, error) {
-	line, err := readLine(r)
+func readBulkString(r *bufio.Reader) (string, error) {
+	size, err := readBulkSize(r)
 	if err != nil {
 		return "", err
 	}
-	if len(line) < 4 || line[0] != '$' {
-		if len(line) == 3 && line[0] == '_' {
-			return "", errNull
-		}
-		return "", readError(r, line, "blob")
-	}
 
-	l := ParseInt(line[1 : len(line)-2])
-	if l < 0 || l > SizeMax {
-		if l == -1 {
-			return "", errNull
-		}
-		return "", readError(r, line, "blob")
-	}
-
-	slice, err := r.Peek(int(l))
-	// delayed error check!
-	if err == nil {
+	slice, err := r.Peek(int(size))
+	switch err {
+	case nil:
 		s := string(slice)
-		_, err = r.Discard(len(s) + 2) // skip CRLF
+		_, err = r.Discard(len(s) + 2) // skip peek + CRLF
 		return s, err
-	}
 
-	var b strings.Builder
-	b.Grow(int(l))
-	for err == bufio.ErrBufferFull {
-		b.Write(slice)
-		r.Discard(len(slice)) // guaranteed no error
-		slice, err = r.Peek(b.Cap() - b.Len())
+	case bufio.ErrBufferFull:
+		buf := make([]byte, size)
+		_, err = io.ReadFull(r, buf)
+		if err != nil {
+			return "", err
+		}
+		_, err = r.Discard(2) // skip CRLF
+		return string(buf), err
 	}
-	b.Write(slice)
-	if err == nil {
-		_, err = r.Discard(len(slice) + 2) // skip CRLF
-	}
-	return b.String(), err
+	return "", err
 }
 
-func decodeBytesArray(r *bufio.Reader) ([][]byte, error) {
+func readBytesArray(r *bufio.Reader) ([][]byte, error) {
 	l, err := readArrayLen(r)
 	if err != nil {
 		return nil, err
 	}
 	array := make([][]byte, l)
 	for i := range array {
-		bytes, err := decodeBlobBytes(r)
+		bytes, err := readBulkBytes(r)
 		switch err {
 		case nil:
 			array[i] = bytes
@@ -239,14 +203,14 @@ func decodeBytesArray(r *bufio.Reader) ([][]byte, error) {
 	return array, nil
 }
 
-func decodeStringArray(r *bufio.Reader) ([]string, error) {
+func readStringArray(r *bufio.Reader) ([]string, error) {
 	l, err := readArrayLen(r)
 	if err != nil {
 		return nil, err
 	}
 	array := make([]string, l)
 	for i := range array {
-		s, err := decodeBlobString(r)
+		s, err := readBulkString(r)
 		switch err {
 		case nil:
 			array[i] = s
@@ -259,58 +223,58 @@ func decodeStringArray(r *bufio.Reader) ([]string, error) {
 	return array, nil
 }
 
+func readBulkSize(r *bufio.Reader) (int64, error) {
+	line, err := readLine(r)
+	switch {
+	case err != nil:
+		return 0, err
+
+	case len(line) > 3 && line[0] == '$':
+		size := ParseInt(line[1 : len(line)-2])
+		if size >= 0 && size <= SizeMax {
+			return size, nil
+		}
+		if size == -1 {
+			// "null bulk string"
+			return 0, errNull
+		}
+
+	case len(line) > 3 && line[0] == '-':
+		return 0, ServerError(line[1 : len(line)-2])
+	}
+
+	return 0, fmt.Errorf("%w; received %.40q for bulk string", errProtocol, line)
+}
+
+func readArrayLen(r *bufio.Reader) (int64, error) {
+	line, err := readLine(r)
+	switch {
+	case err != nil:
+		return 0, err
+
+	case len(line) > 3 && line[0] == '*':
+		l := ParseInt(line[1 : len(line)-2])
+		if l >= 0 && l <= ElementMax {
+			return l, nil
+		}
+		if l == -1 {
+			// "null array"
+			return 0, errNull
+		}
+
+	case len(line) > 3 && line[0] == '-':
+		return 0, ServerError(line[1 : len(line)-2])
+	}
+
+	return 0, fmt.Errorf("%w; received %.40q for array", errProtocol, line)
+}
+
 func readLine(r *bufio.Reader) (line []byte, err error) {
 	line, err = r.ReadSlice('\n')
 	if err == bufio.ErrBufferFull {
 		err = fmt.Errorf("%w; line %.40q… exceeds %d bytes", errProtocol, line, r.Size())
 	}
 	return
-}
-
-func readArrayLen(r *bufio.Reader) (int64, error) {
-	line, err := readLine(r)
-	if err != nil {
-		return 0, err
-	}
-	if len(line) < 4 {
-		if len(line) == 3 && line[0] == '_' {
-			return 0, errNull
-		}
-	} else if line[0] == '*' {
-		switch l := ParseInt(line[1 : len(line)-2]); {
-		case l >= 0 && l <= ElementMax:
-			return l, nil
-		case l == -1:
-			// obsolete with RESP3
-			return 0, errNull
-		}
-	}
-	return 0, readError(r, line, "array")
-}
-
-func readError(r *bufio.Reader, line []byte, want string) error {
-	if len(line) > 3 {
-		switch line[0] {
-		case '-':
-			return ServerError(line[1 : len(line)-2])
-
-		case '!':
-			l := ParseInt(line[1 : len(line)-2])
-			if l >= 0 && l <= SizeMax {
-				slice, err := r.Peek(int(l))
-				if err == nil {
-					e := ServerError(slice)
-					_, err = r.Discard(int(l) + 2) // skip CRLF
-					if err == nil {
-						return e
-					}
-				}
-				return fmt.Errorf("redis: blob error unavailable due %w", err)
-			}
-		}
-	}
-
-	return fmt.Errorf("%w; %s expected–received %.40q", errProtocol, want, line)
 }
 
 // errMapSlices rejects execution due malformed invocation.
