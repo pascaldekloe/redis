@@ -302,10 +302,6 @@ func (l *Listener) readLoop(reader *bufio.Reader) error {
 		head1 := binary.LittleEndian.Uint64(head)
 		head2 := binary.LittleEndian.Uint64(head[8:])
 		switch {
-		default:
-			reader.Discard(16)
-			return readError(reader, head, "push array")
-
 		case head1 == '*'|'3'<<8|'\r'<<16|'\n'<<24|'$'<<32|'7'<<40|'\r'<<48|'\n'<<56 &&
 			head2 == 'm'|'e'<<8|'s'<<16|'s'<<24|'a'<<32|'g'<<40|'e'<<48|'\r'<<56:
 			err = l.onMessage(reader, confirmedSubs)
@@ -354,6 +350,19 @@ func (l *Listener) readLoop(reader *bufio.Reader) error {
 			delete(l.unsubs, channel)
 			l.mutex.Unlock()
 			delete(confirmedSubs, channel)
+
+		case head[0] == '-':
+			line, err := reader.ReadString('\n')
+			if err != nil {
+				return fmt.Errorf("redis: server error %q: %w", line, err)
+			}
+			if len(line) < 3 || line[len(line)-2] != '\r' {
+				return fmt.Errorf("%w; error %.40q without CRLF", errProtocol, line)
+			}
+			l.Func("", nil, ServerError(line[1:len(line)-2]))
+
+		default:
+			return fmt.Errorf("%w; received %q", errProtocol, head)
 		}
 	}
 }
@@ -370,7 +379,7 @@ func (l *Listener) onMessage(r *bufio.Reader, confirmedSubs map[string]string) e
 		return fmt.Errorf("redis: message array-reply channel-size: %w", err)
 	}
 	if len(line) < 4 || line[0] != '$' {
-		return readError(r, line, "message array-reply channel-size")
+		return fmt.Errorf("redis: message array-reply channel-size %.40q", line)
 	}
 	channelSize := ParseInt(line[1 : len(line)-2])
 	if channelSize < 0 || channelSize > SizeMax {
@@ -396,7 +405,7 @@ func (l *Listener) onMessage(r *bufio.Reader, confirmedSubs map[string]string) e
 		return err
 	}
 	if len(line) < 4 || line[0] != '$' {
-		return readError(r, line, "message array-reply payload-size")
+		return fmt.Errorf("redis: message array-reply payload-size %.40q", line)
 	}
 	payloadSize := ParseInt(line[1 : len(line)-2])
 	if payloadSize < 0 || payloadSize > SizeMax {
