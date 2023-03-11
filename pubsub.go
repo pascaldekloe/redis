@@ -308,77 +308,25 @@ func (l *Listener) readLoop(reader *bufio.Reader) error {
 
 		case head1 == '*'|'3'<<8|'\r'<<16|'\n'<<24|'$'<<32|'7'<<40|'\r'<<48|'\n'<<56 &&
 			head2 == 'm'|'e'<<8|'s'<<16|'s'<<24|'a'<<32|'g'<<40|'e'<<48|'\r'<<56:
-			_, err := reader.Discard(17)
-			if err != nil {
-				return fmt.Errorf("redis: message array-replay: %w", err)
-			}
-
-			// parse channel
-			line, err := readLine(reader)
-			if err != nil {
-				return fmt.Errorf("redis: message array-replay channel-size: %w", err)
-			}
-			if len(line) < 4 || line[0] != '$' {
-				return readError(reader, line, "message array-replay channel-size")
-			}
-			channelSize := ParseInt(line[1 : len(line)-2])
-			if channelSize < 0 || channelSize > SizeMax {
-				return fmt.Errorf("redis: message array-replay channel-size %.40q", line)
-			}
-			channelSlice, err := reader.Peek(int(channelSize))
-			if err != nil {
-				return fmt.Errorf("redis: message array-replay channel: %w", err)
-			}
-			channel, ok := confirmedSubs[string(channelSlice)] // no malloc
-			if !ok {
-				// fishy, yet it could happen with engines like DragonflyDB
-				channel = string(channelSlice) // malloc
-			}
-			_, err = reader.Discard(len(channelSlice) + 2) // skip CRLF
-			if err != nil {
-				return fmt.Errorf("redis: message array-replay channel-CRLF: %w", err)
-			}
-
-			// parse payload
-			line, err = readLine(reader)
+			err = l.onMessage(reader, confirmedSubs)
 			if err != nil {
 				return err
-			}
-			if len(line) < 4 || line[0] != '$' {
-				return readError(reader, line, "message array-replay payload-size")
-			}
-			payloadSize := ParseInt(line[1 : len(line)-2])
-			if payloadSize < 0 || payloadSize > SizeMax {
-				return fmt.Errorf("redis: message array-replay payload-size %.40q", line)
-			}
-			if payloadSize > int64(l.BufferSize) {
-				l.Func(channel, nil, io.ErrShortBuffer)
-			} else {
-				payloadSlice, err := reader.Peek(int(payloadSize))
-				if err != nil {
-					return fmt.Errorf("redis: message array-replay payload: %w", err)
-				}
-				l.Func(channel, payloadSlice, nil)
-			}
-			_, err = reader.Discard(int(payloadSize) + 2) // skip CRLF
-			if err != nil {
-				return fmt.Errorf("redis: message array-replay payload-CRLF: %w", err)
 			}
 
 		case head1 == '*'|'3'<<8|'\r'<<16|'\n'<<24|'$'<<32|'9'<<40|'\r'<<48|'\n'<<56 &&
 			head2 == 's'|'u'<<8|'b'<<16|'s'<<24|'c'<<32|'r'<<40|'i'<<48|'b'<<56:
 			_, err := reader.Discard(19)
 			if err != nil {
-				return fmt.Errorf("redis: subscribe array-replay: %w", err)
+				return fmt.Errorf("redis: subscribe array-reply: %w", err)
 			}
 
 			channel, err := decodeBlobString(reader)
 			if err != nil {
-				return fmt.Errorf("redis: subscribe array-replay channel: %w", err)
+				return fmt.Errorf("redis: subscribe array-reply channel: %w", err)
 			}
 			// subscription count is useless with concurrency
 			if _, err := decodeInteger(reader); err != nil {
-				return fmt.Errorf("redis: subscribe array-replay count: %w", err)
+				return fmt.Errorf("redis: subscribe array-reply count: %w", err)
 			}
 
 			l.mutex.Lock()
@@ -389,16 +337,16 @@ func (l *Listener) readLoop(reader *bufio.Reader) error {
 		case head1 == '*'|'3'<<8|'\r'<<16|'\n'<<24|'$'<<32|'1'<<40|'1'<<48|'\r'<<56 &&
 			head2 == '\n'|'u'<<8|'n'<<16|'s'<<24|'u'<<32|'b'<<40|'s'<<48|'c'<<56:
 			if _, err := reader.Discard(22); err != nil {
-				return fmt.Errorf("redis: unsubscribe array-replay: %w", err)
+				return fmt.Errorf("redis: unsubscribe array-reply: %w", err)
 			}
 
 			channel, err := decodeBlobString(reader)
 			if err != nil {
-				return fmt.Errorf("redis: unsubscribe array-replay channel: %w", err)
+				return fmt.Errorf("redis: unsubscribe array-reply channel: %w", err)
 			}
 			// subscription count is useless with concurrency
 			if _, err := decodeInteger(reader); err != nil {
-				return fmt.Errorf("redis: unsubscribe array-replay count: %w", err)
+				return fmt.Errorf("redis: unsubscribe array-reply count: %w", err)
 			}
 
 			l.mutex.Lock()
@@ -408,6 +356,67 @@ func (l *Listener) readLoop(reader *bufio.Reader) error {
 			delete(confirmedSubs, channel)
 		}
 	}
+}
+
+func (l *Listener) onMessage(r *bufio.Reader, confirmedSubs map[string]string) error {
+	_, err := r.Discard(17)
+	if err != nil {
+		return fmt.Errorf("redis: message array-reply: %w", err)
+	}
+
+	// parse channel
+	line, err := readLine(r)
+	if err != nil {
+		return fmt.Errorf("redis: message array-reply channel-size: %w", err)
+	}
+	if len(line) < 4 || line[0] != '$' {
+		return readError(r, line, "message array-reply channel-size")
+	}
+	channelSize := ParseInt(line[1 : len(line)-2])
+	if channelSize < 0 || channelSize > SizeMax {
+		return fmt.Errorf("redis: message array-reply channel-size %.40q", line)
+	}
+	channelSlice, err := r.Peek(int(channelSize))
+	if err != nil {
+		return fmt.Errorf("redis: message array-reply channel: %w", err)
+	}
+	channel, ok := confirmedSubs[string(channelSlice)] // no malloc
+	if !ok {
+		// fishy, yet it could happen with engines like DragonflyDB
+		channel = string(channelSlice) // malloc
+	}
+	_, err = r.Discard(len(channelSlice) + 2) // skip CRLF
+	if err != nil {
+		return fmt.Errorf("redis: message array-reply channel-CRLF: %w", err)
+	}
+
+	// parse payload
+	line, err = readLine(r)
+	if err != nil {
+		return err
+	}
+	if len(line) < 4 || line[0] != '$' {
+		return readError(r, line, "message array-reply payload-size")
+	}
+	payloadSize := ParseInt(line[1 : len(line)-2])
+	if payloadSize < 0 || payloadSize > SizeMax {
+		return fmt.Errorf("redis: message array-reply payload-size %.40q", line)
+	}
+	if payloadSize > int64(l.BufferSize) {
+		l.Func(channel, nil, io.ErrShortBuffer)
+	} else {
+		payloadSlice, err := r.Peek(int(payloadSize))
+		if err != nil {
+			return fmt.Errorf("redis: message array-reply payload: %w", err)
+		}
+		l.Func(channel, payloadSlice, nil)
+	}
+	_, err = r.Discard(int(payloadSize) + 2) // skip CRLF
+	if err != nil {
+		return fmt.Errorf("redis: message array-reply payload-CRLF: %w", err)
+	}
+
+	return nil
 }
 
 // submit either sends a request or it closes the connection.
