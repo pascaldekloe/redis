@@ -10,69 +10,70 @@ import (
 	"time"
 )
 
-// listenerCall is a test recording.
+// listenerCall defines a ListenerConfig.Func invocation.
 type listenerCall struct {
 	channel string
 	message string
 	err     error
 }
 
-func testListenerClose(t *testing.T, l *Listener, calls <-chan *listenerCall) {
-	if err := l.Close(); err != nil {
-		t.Error("Listener Close error:", err)
-	}
-	for call := range calls {
-		if call.err != nil {
-			t.Error("unexpected Listener error:", call.err)
-		} else {
-			t.Errorf("unexpected message %q on %q", call.message, call.channel)
-		}
-	}
-}
-
 // newTestListener closes the channel upon ErrClosed, or test-time-out.
 func newTestListener(t *testing.T) (*Listener, <-chan *listenerCall) {
-	record := make(chan *listenerCall, 99)
+	calls := make(chan *listenerCall, 99)
+	closed := make(chan struct{})
 	l := NewListener(ListenerConfig{
 		Func: func(channel string, message []byte, err error) {
+			if err == ErrClosed {
+				select {
+				case <-closed:
+					t.Error("Listener called with ErrClosed again")
+				default:
+					close(closed)
+				}
+				return
+			}
+
 			select {
-			case record <- &listenerCall{channel, string(message), err}:
+			case <-closed:
+				t.Error("Listener call after ErrClosed")
+			default:
+				break
+			}
+
+			select {
+			case calls <- &listenerCall{channel, string(message), err}:
 				break
 			default:
 				t.Error("Listener recording capacity reached")
 			}
 		},
-		Addr:           testClient.Addr,
-		Password:       password,
-		CommandTimeout: 10 * time.Millisecond,
+
+		Addr:           testConfig.Addr,
+		CommandTimeout: testConfig.CommandTimeout,
+		DialTimeout:    testConfig.DialTimeout,
+		Password:       testConfig.Password,
 	})
 
-	out := make(chan *listenerCall)
-	go func() {
-		defer close(out)
-
+	t.Cleanup(func() {
 		timeout := time.NewTimer(time.Second)
-		defer timeout.Stop()
-		for {
-			select {
-			case <-timeout.C:
-				t.Error("Listener recording time-out")
-				return
 
-			case call := <-record:
-				if call.err == ErrClosed {
-					time.Sleep(10 * time.Millisecond)
-					if len(record) != 0 {
-						t.Errorf("got %d Listener invocations after ErrClosed", len(record))
-					}
-					return
-				}
-
-				out <- call
-			}
+		if err := l.Close(); err != nil {
+			t.Error("Listener Close error:", err)
 		}
-	}()
-	return l, out
+
+		select {
+		case <-timeout.C:
+			t.Error("timeout awaiting Listener shutdown")
+		case <-closed:
+			timeout.Stop()
+		}
+
+		if n := len(calls); n != 0 {
+			t.Errorf("got %d more Listener calls", n)
+		}
+	})
+
+	return l, calls
 }
 
 func TestSubscribe(t *testing.T) {
@@ -85,54 +86,70 @@ func TestSubscribe(t *testing.T) {
 	go func() {
 		start := time.Now()
 
-		// wait for first message to land
-		clientCount, err := testClient.PUBLISH(channel, []byte(message1))
-		for err == nil && clientCount == 0 {
-			if time.Now().Sub(start) > time.Second/10 {
-				t.Fatal("publish timeout")
+		// publish until confirmed receiver
+		var clientN int64
+		for clientN == 0 {
+			var err error
+			clientN, err = testClient.PUBLISH(channel, []byte(message1))
+			switch {
+			case err != nil:
+				t.Error("publish error:", err)
+				return
+			case time.Now().Sub(start) > time.Second/10:
+				t.Error("timeout: no publish receiver yet")
+				return
 			}
-			clientCount, err = testClient.PUBLISH(channel, []byte(message1))
 		}
-		if err != nil {
-			t.Fatal("publish error:", err)
-		}
-		if clientCount != 1 {
-			t.Errorf("publish got %d clients, want 1", clientCount)
+		if clientN != 1 {
+			t.Errorf("publish got %d clients, want 1", clientN)
 		}
 
 		// follow up with second message
-		clientCount, err = testClient.PUBLISHString(channel, message2)
+		clientN, err := testClient.PUBLISHString(channel, message2)
 		if err != nil {
-			t.Fatal("publish error:", err)
+			t.Error("followup publish error:", err)
+			return
 		}
-		if clientCount != 1 {
-			t.Errorf("publish got %d clients, want 1", clientCount)
+		if clientN != 1 {
+			t.Errorf("flowup publish got %d clients, want 1", clientN)
 		}
 	}()
 
 	l, calls := newTestListener(t)
-	defer testListenerClose(t, l, calls)
-
 	l.SUBSCRIBE(channel)
-	call1 := <-calls
-	if call1.err != nil {
-		t.Fatal("called with error:", call1.err)
-	} else if call1.channel != channel || call1.message != message1 {
-		t.Errorf("got message %q@%q, want %q@%q", call1.message, call1.channel, message1, channel)
+	timeout := time.NewTimer(time.Second)
+	defer timeout.Stop()
+
+	select {
+	case c := <-calls:
+		if c.err != nil {
+			t.Fatal("first call got error:", c.err)
+		}
+		if c.channel != channel || c.message != message1 {
+			t.Errorf("first call got message %q@%q, want %q@%q",
+				c.message, c.channel, message1, channel)
+		}
+	case <-timeout.C:
+		t.Fatal("test timeout while awaiting first call")
 	}
-	call2 := <-calls
-	if call2.err != nil {
-		t.Fatal("called with error:", call2.err)
-	} else if call2.channel != channel || call2.message != message2 {
-		t.Errorf("got message %q@%q, want %q@%q", call2.message, call2.channel, message2, channel)
+
+	select {
+	case c := <-calls:
+		if c.err != nil {
+			t.Fatal("second call got error:", c.err)
+		}
+		if c.channel != channel || c.message != message2 {
+			t.Errorf("second call got message %q@%q, want %q@%q",
+				c.message, c.channel, message2, channel)
+		}
+	case <-timeout.C:
+		t.Fatal("test timeout while awaiting second call")
 	}
 }
 
 func TestUnsubscribe(t *testing.T) {
 	t.Parallel()
-
-	l, calls := newTestListener(t)
-	defer testListenerClose(t, l, calls)
+	l, _ := newTestListener(t)
 
 	channel := randomKey("channel")
 	l.SUBSCRIBE(channel)
@@ -152,9 +169,7 @@ func TestUnsubscribe(t *testing.T) {
 
 func TestUnsubscribeRace(t *testing.T) {
 	t.Parallel()
-
-	l, calls := newTestListener(t)
-	defer testListenerClose(t, l, calls)
+	l, _ := newTestListener(t)
 
 	channel := randomKey("channel")
 	l.SUBSCRIBE(channel)
@@ -171,11 +186,9 @@ func TestUnsubscribeRace(t *testing.T) {
 	}
 }
 
-func TestSubscriptionConcurrency(t *testing.T) {
+func TestSubscriptionRace(t *testing.T) {
 	t.Parallel()
-
-	l, calls := newTestListener(t)
-	defer testListenerClose(t, l, calls)
+	l, _ := newTestListener(t)
 
 	channels := make([]string, 9)
 	for i := range channels {
@@ -203,9 +216,7 @@ func TestSubscriptionConcurrency(t *testing.T) {
 
 func TestListenerClose(t *testing.T) {
 	t.Parallel()
-
-	l, calls := newTestListener(t)
-	defer testListenerClose(t, l, calls)
+	l, _ := newTestListener(t)
 
 	channel1 := randomKey("channel")
 	channel2 := randomKey("channel")
@@ -237,9 +248,7 @@ func TestListenerClose(t *testing.T) {
 
 func TestListenerBufferLimit(t *testing.T) {
 	t.Parallel()
-
 	l, calls := newTestListener(t)
-	defer testListenerClose(t, l, calls)
 
 	channel := randomKey("channel")
 	l.SUBSCRIBE(channel)
@@ -257,83 +266,104 @@ func TestListenerBufferLimit(t *testing.T) {
 		t.Errorf("publish got %d clients, want 1", n)
 	}
 
-	if call := <-calls; call.err != io.ErrShortBuffer {
-		t.Errorf("got error %q, want io.ErrShortBuffer", call.err)
+	timeout := time.NewTimer(time.Second)
+	defer timeout.Stop()
+
+	select {
+	case call := <-calls:
+		if call.err != io.ErrShortBuffer {
+			t.Errorf("got error %q, want io.ErrShortBuffer", call.err)
+		}
+	case <-timeout.C:
+		t.Fatal("test timeout while awaiting second call")
 	}
-	if call := <-calls; call.err != nil {
-		t.Error("second message should pass; got error:", call.err)
+
+	select {
+	case call := <-calls:
+		if call.err != nil {
+			t.Error("second message should pass; got error:", call.err)
+		}
+	case <-timeout.C:
+		t.Fatal("test timeout while awaiting second call")
 	}
 }
 
 func BenchmarkPubSub(b *testing.B) {
-	channel := randomKey("channel")
-
 	for _, size := range []int{8, 800, 24000} {
 		b.Run(fmt.Sprintf("%dB", size), func(b *testing.B) {
-			for _, routines := range []int{1, 2, 16} {
-				b.Run(fmt.Sprintf("%dpublishers", routines), func(b *testing.B) {
-					b.SetBytes(int64(size))
-
-					// closed after reception of b.N messages
-					done := make(chan struct{})
-					var messageCount int
-					var delayNS uint64
-					l := NewListener(ListenerConfig{
-						Func: func(_ string, message []byte, err error) {
-							if err == ErrClosed {
-								return
-							}
-							if err != nil {
-								b.Fatal("called with error:", err)
-							}
-
-							if l := len(message); l != size {
-								b.Fatalf("called with %d bytes, want %d", l, size)
-							}
-							timestamp := binary.LittleEndian.Uint64(message)
-							delayNS += uint64(time.Now().UnixNano()) - timestamp
-							messageCount++
-							if messageCount >= b.N {
-								b.ReportMetric(float64(delayNS)/float64(b.N), "ns/delay")
-								close(done)
-							}
-						},
-						Addr:     testClient.Addr,
-						Password: password,
-					})
-					defer l.Close()
-
-					l.SUBSCRIBE(channel)
-					// await execution
-					time.Sleep(10 * time.Millisecond)
-					b.ResetTimer()
-
-					// publish
-					var pubTimeNS int64
-					b.SetParallelism(routines)
-					b.RunParallel(func(pb *testing.PB) {
-						message := make([]byte, size)
-
-						start := time.Now().UnixNano()
-						for pb.Next() {
-							timestamp := uint64(time.Now().UnixNano())
-							binary.LittleEndian.PutUint64(message, timestamp)
-
-							n, err := benchClient.PUBLISH(channel, message)
-							if err != nil {
-								b.Fatal("PUBLISH error:", err)
-							}
-							if n != 1 {
-								b.Fatalf("PUBLISH to %d clients, want 1", n)
-							}
-						}
-						atomic.AddInt64(&pubTimeNS, time.Now().UnixNano()-start)
-
-						<-done // await receival
-					})
-					b.ReportMetric(float64(atomic.LoadInt64(&pubTimeNS))/float64(b.N), "ns/publish")
+			for _, routineN := range []int{1, 2, 16} {
+				b.Run(fmt.Sprintf("%dpublishers", routineN), func(b *testing.B) {
+					benchmarkPubSub(b, size, routineN)
 				})
 			}
 		})
 	}
+}
+
+func benchmarkPubSub(b *testing.B, size, routineN int) {
+	channel := randomKey("channel")
+	b.SetBytes(int64(size))
+
+	// closed after reception of b.N messages
+	done := make(chan struct{})
+	var messageCount int
+	var delayNS uint64
+	l := NewListener(ListenerConfig{
+		Func: func(_ string, message []byte, err error) {
+			if err != nil {
+				if err != ErrClosed {
+					b.Error("called with error:", err)
+				}
+				return
+			}
+
+			if l := len(message); l != size {
+				b.Errorf("called with %d bytes, want %d", l, size)
+			}
+			timestamp := binary.LittleEndian.Uint64(message)
+
+			delayNS += uint64(time.Now().UnixNano()) - timestamp
+			messageCount++
+			if messageCount == b.N {
+				b.ReportMetric(float64(delayNS)/float64(messageCount), "ns/delay")
+				close(done)
+			}
+		},
+		Addr:           testConfig.Addr,
+		CommandTimeout: testConfig.CommandTimeout,
+		DialTimeout:    testConfig.DialTimeout,
+		Password:       testConfig.Password,
+	})
+	defer l.Close()
+
+	l.SUBSCRIBE(channel)
+	// await execution
+	time.Sleep(10 * time.Millisecond)
+	b.ResetTimer()
+
+	var pubTimeNS atomic.Int64
+
+	// publish
+	message := make([]byte, size)
+	b.SetParallelism(routineN)
+	b.RunParallel(func(pb *testing.PB) {
+		start := time.Now().UnixNano()
+		for pb.Next() {
+			timestamp := uint64(time.Now().UnixNano())
+			binary.LittleEndian.PutUint64(message, timestamp)
+
+			n, err := benchClient.PUBLISH(channel, message)
+			if err != nil {
+				b.Fatal("PUBLISH error:", err)
+			}
+			if n != 1 {
+				b.Fatalf("PUBLISH to %d clients, want 1", n)
+			}
+		}
+		pubTimeNS.Add(time.Now().UnixNano() - start)
+
+		<-done // await receival
+	})
+
+	b.ReportMetric(float64(pubTimeNS.Load())/float64(b.N), "ns/publish")
 }

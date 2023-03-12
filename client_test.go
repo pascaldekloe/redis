@@ -17,7 +17,6 @@ import (
 
 var testConfig ClientConfig
 var testClient, benchClient *Client
-var password []byte
 
 func init() {
 	var ok bool
