@@ -172,7 +172,9 @@ func TestReadError(t *testing.T) {
 	// break connection
 	select {
 	case conn := <-testClient.connSem:
-		conn.Conn.Close()
+		if conn.Conn != nil {
+			conn.Conn.Close()
+		}
 
 		// replace with closed pipe
 		c, _ := net.Pipe()
