@@ -68,8 +68,17 @@ func newTestListener(t *testing.T) (*Listener, <-chan *listenerCall) {
 			timeout.Stop()
 		}
 
-		if n := len(calls); n != 0 {
-			t.Errorf("got %d more Listener calls", n)
+		for {
+			select {
+			case call := <-calls:
+				if call.err != nil {
+					t.Error("Listener called with error after Close: ", call.err)
+				} else {
+					t.Errorf("Listener called with %q@%q after Close", call.message, call.channel)
+				}
+			default:
+				return
+			}
 		}
 	})
 
