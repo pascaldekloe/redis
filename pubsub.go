@@ -99,8 +99,12 @@ type Listener struct {
 	// Entries are removed once confirmed.
 	unsubs map[string]time.Time
 
+	// Interval for command expiry check.
+	expireTimer *time.Timer
+
 	// shutdown signaling
-	quit, closed chan struct{}
+	quited time.Time
+	closed chan struct{}
 }
 
 // NewListener launches a managed connection.
@@ -111,7 +115,6 @@ func NewListener(config ListenerConfig) *Listener {
 		ListenerConfig: config,
 		subs:           make(map[string]time.Time),
 		unsubs:         make(map[string]time.Time),
-		quit:           make(chan struct{}),
 		closed:         make(chan struct{}),
 	}
 
@@ -121,24 +124,96 @@ func NewListener(config ListenerConfig) *Listener {
 	return l
 }
 
+// Expire must be called with a new l.expireTimer only. The timer will be used
+// to terminate the connection on l.CommandTimeout. Evaluation continues until
+// all pending commands completed. Once done, l.expireTimer is set back to nil.
+func (l *Listener) expire(timer *time.Timer) {
+	for {
+		var notBefore time.Time
+		select {
+		case <-l.closed:
+			timer.Stop()
+			return
+		case now := <-timer.C:
+			notBefore = now.Add(-l.CommandTimeout)
+		}
+
+		// evaluate expiry in lock
+		l.mutex.Lock()
+		conn := l.conn
+		if conn == nil {
+			// clear to exit
+			l.expireTimer = nil
+			l.mutex.Unlock()
+			return
+		}
+		// continue in lock
+
+		oldest := l.quited
+		for _, reqTime := range l.subs {
+			if !reqTime.IsZero() && (oldest.IsZero() || reqTime.Before(oldest)) {
+				oldest = reqTime
+			}
+		}
+		for _, reqTime := range l.unsubs {
+			if !reqTime.IsZero() && (oldest.IsZero() || reqTime.Before(oldest)) {
+				oldest = reqTime
+			}
+		}
+		// continue in lock
+
+		allDone := oldest.IsZero()
+		expired := !allDone && oldest.Before(notBefore)
+		if allDone || expired {
+			// clear to exit
+			l.expireTimer = nil
+		}
+		l.mutex.Unlock()
+
+		if allDone {
+			return
+		}
+		if expired {
+			l.Func("", nil, errors.New("redis: listener connection reset due to command expiry"))
+			l.closeConn(conn)
+			return
+		}
+
+		// evaluate again
+		timer.Reset(l.CommandTimeout / 2)
+	}
+}
+
 // Close terminates the connection establishment. The Listener Func is called
 // with ErrClosed before return, and after the network connection was closed.
 // Calling Close more than once just blocks until the first call completed.
 func (l *Listener) Close() error {
+	var conn net.Conn
 	l.mutex.Lock()
-	select {
-	case <-l.quit:
-		break // already invoked
-	default:
-		close(l.quit)
-
+	if l.quited.IsZero() {
+		l.quited = time.Now()
+		if l.expireTimer == nil {
+			l.expireTimer = time.NewTimer(l.CommandTimeout)
+			go l.expire(l.expireTimer)
+		}
+		conn = l.conn
 	}
-	l.conn = nil
 	l.mutex.Unlock()
+
+	if conn != nil {
+		l.submit(conn, newRequest("*1\r\n$4\r\nQUIT\r\n"))
+	}
 
 	// await completion
 	<-l.closed
 	return nil
+}
+
+func (l *Listener) closeConn(conn net.Conn) {
+	err := conn.Close()
+	if err != nil && !errors.Is(err, net.ErrClosed) {
+		l.Func("", nil, fmt.Errorf("redis: connection leak: %w", err))
+	}
 }
 
 func (l *Listener) connectLoop() {
@@ -151,14 +226,6 @@ func (l *Listener) connectLoop() {
 
 	var retryDelay time.Duration
 	for {
-		// l.conn is zero; check l.halt for shutdown requests
-		select {
-		case <-l.quit:
-			return // accept shutdown
-		default:
-			break
-		}
-
 		config := ClientConfig{
 			Addr:           l.Addr,
 			CommandTimeout: l.CommandTimeout,
@@ -177,30 +244,61 @@ func (l *Listener) connectLoop() {
 				retryDelay = DialDelayMax
 			}
 			<-retry.C
+
+			l.mutex.Lock()
+			quited := l.quited
+			l.mutex.Unlock()
+			if !quited.IsZero() {
+				return
+			}
+
 			continue
 		}
 		// connect success
 		retryDelay = 0
 
-		subs := l.releaseConn(conn)
+		// install
+		subs, ok := l.releaseConn(conn)
+		if !ok {
+			return // accept exit
+		}
+		// resubscribe
 		if len(subs) != 0 {
 			go func(conn net.Conn) {
 				req := newRequestSize(1+len(subs), "\r\n$9\r\nSUBSCRIBE")
 				req.addStringList(subs)
 				l.submit(conn, req)
 			}(conn)
+
 		}
-		l.manageConn(conn, reader)
+
+		// operate
+		err = l.readLoop(reader)
+		if err != nil {
+			l.Func("", nil, err)
+		} else {
+			return
+		}
+		l.closeConn(conn)
+
+		// retract
 		l.mutex.Lock()
 		l.conn = nil
+		quited := l.quited
 		l.mutex.Unlock()
-		conn.Close()
+		if !quited.IsZero() {
+			return
+		}
 	}
 }
 
-func (l *Listener) releaseConn(conn net.Conn) (subs []string) {
+func (l *Listener) releaseConn(conn net.Conn) (subs []string, ok bool) {
 	l.mutex.Lock()
 	defer l.mutex.Unlock()
+
+	if !l.quited.IsZero() {
+		return nil, false
+	}
 
 	l.conn = conn
 
@@ -216,77 +314,13 @@ func (l *Listener) releaseConn(conn net.Conn) (subs []string) {
 		l.subs[name] = reqTime
 		subs = append(subs, name)
 	}
-	return
-}
 
-var (
-	errQUITTimeout        = errors.New("redis: QUIT expired by timeout")
-	errSUBSCRIBETimeout   = errors.New("redis: SUBSCRIBE expired by timeout")
-	errUNSUBSCRIBETimeout = errors.New("redis: UNSUBSCRIBE expired by timeout")
-)
-
-func (l *Listener) manageConn(conn net.Conn, reader *bufio.Reader) {
-	// read input
-	errChan := make(chan error, 1)
-	go func() {
-		errChan <- l.readLoop(reader)
-	}()
-
-	monitorInterval := l.CommandTimeout / 4
-	if monitorInterval < time.Millisecond {
-		monitorInterval = time.Millisecond
+	if len(subs) != 0 {
+		l.expireTimer = time.NewTimer(l.CommandTimeout)
+		go l.expire(l.expireTimer)
 	}
-	monitorTicker := time.NewTicker(monitorInterval)
-	defer monitorTicker.Stop()
 
-	for {
-		select {
-		case <-l.quit:
-			// try graceful shutdown with QUIT command
-			req := newRequest("*1\r\n$4\r\nQUIT\r\n")
-			l.submit(conn, req)
-
-			// Await read routine to stop, idealy by and EOF from QUIT.
-			conn.SetReadDeadline(time.Now().Add(l.CommandTimeout))
-			err := <-errChan
-			var e net.Error
-			switch {
-			case errors.Is(err, io.EOF):
-				break // correct QUIT result
-			case errors.As(err, &e) && e.Timeout():
-				l.Func("", nil, errQUITTimeout)
-			case err != nil:
-				l.Func("", nil, err)
-			}
-			return // accept shutdown
-
-		case err := <-errChan:
-			if !errors.Is(err, net.ErrClosed) {
-				l.Func("", nil, err)
-			} // else terminated by write error
-			return
-
-		case t := <-monitorTicker.C:
-			expire := t.Add(-l.CommandTimeout)
-
-			l.mutex.Lock()
-			for _, timestamp := range l.subs {
-				if !timestamp.IsZero() && timestamp.Before(expire) {
-					l.Func("", nil, errSUBSCRIBETimeout)
-					l.mutex.Unlock()
-					return // any error from read loop gets discarded
-				}
-			}
-			for _, timestamp := range l.unsubs {
-				if !timestamp.IsZero() && timestamp.Before(expire) {
-					l.Func("", nil, errUNSUBSCRIBETimeout)
-					l.mutex.Unlock()
-					return // any error from read loop gets discarded
-				}
-			}
-			l.mutex.Unlock()
-		}
-	}
+	return subs, true
 }
 
 func (l *Listener) readLoop(reader *bufio.Reader) error {
@@ -296,10 +330,14 @@ func (l *Listener) readLoop(reader *bufio.Reader) error {
 	for {
 		head, err := reader.Peek(16)
 		if err != nil {
+			// QUIT makes "+OK\r\n" + EOF
+			if err == io.EOF && len(head) > 4 && string(head[:5]) == "+OK\r\n" {
+				return nil
+			}
 			return err
 		}
 
-		head1 := binary.LittleEndian.Uint64(head)
+		head1 := binary.LittleEndian.Uint64(head[:8])
 		head2 := binary.LittleEndian.Uint64(head[8:])
 		switch {
 		case head1 == '*'|'3'<<8|'\r'<<16|'\n'<<24|'$'<<32|'7'<<40|'\r'<<48|'\n'<<56 &&
@@ -402,7 +440,7 @@ func (l *Listener) onMessage(r *bufio.Reader, confirmedSubs map[string]string) e
 	// parse payload
 	line, err = readLine(r)
 	if err != nil {
-		return err
+		return fmt.Errorf("redis: message array-reply payload-size: %w", err)
 	}
 	if len(line) < 4 || line[0] != '$' {
 		return fmt.Errorf("redis: message array-reply payload-size %.40q", line)
@@ -431,23 +469,17 @@ func (l *Listener) onMessage(r *bufio.Reader, confirmedSubs map[string]string) e
 // submit either sends a request or it closes the connection.
 func (l *Listener) submit(conn net.Conn, req *request) {
 	defer req.free()
-	conn.SetWriteDeadline(time.Now().Add(l.CommandTimeout))
 	_, err := conn.Write(req.buf)
 	if err != nil {
-		conn.Close()
-		if !errors.Is(err, net.ErrClosed) {
-			l.Func("", nil, err)
-		}
+		l.closeConn(conn)
 	}
 }
 
-// SUBSCRIBE executes <https://redis.io/commands/subscribe> in a persistent way.
-// Subscription confirmation is subject to the CommandTimeout configuration.
-// If a Listener encounters an error, including a time-out, then its network
-// connection will reset with automated attempts to reach the requested state.
-// Invocation with zero arguments has no effect.
+// SUBSCRIBE executes <https://redis.io/commands/subscribe> in a persistent
+// manner. New connections automatically re-subscribe (until UNSUBSCRIBE).
 func (l *Listener) SUBSCRIBE(channels ...string) {
-	var todo []string
+	var channelN int
+
 	l.mutex.Lock()
 	reqTime := time.Now()
 	for _, s := range channels {
@@ -459,26 +491,29 @@ func (l *Listener) SUBSCRIBE(channels ...string) {
 			continue // redundant
 		}
 		l.subs[s] = reqTime
-		todo = append(todo, s)
+		// rewrite & count
+		channels[channelN] = s
+		channelN++
 	}
+
 	conn := l.conn
+	if conn != nil && channelN != 0 && l.expireTimer == nil {
+		l.expireTimer = time.NewTimer(l.CommandTimeout)
+		go l.expire(l.expireTimer)
+	}
 	l.mutex.Unlock()
 
-	if conn != nil && len(todo) != 0 {
-		r := newRequestSize(len(todo)+1, "\r\n$9\r\nSUBSCRIBE")
-		r.addStringList(todo)
+	if conn != nil && channelN != 0 {
+		r := newRequestSize(channelN+1, "\r\n$9\r\nSUBSCRIBE")
+		r.addStringList(channels[:channelN])
 		l.submit(conn, r)
 	}
 }
 
-// UNSUBSCRIBE executes <https://redis.io/commands/unsubscribe> in a persistent
-// way. Unsubscription confirmation is subject to the CommandTimeout
-// configuration. If a Listener encounters an error, including a time-out,
-// then its network connection will reset, causing the unsubscribe with
-// immediate effect. Invocation with zero arguments is not covered by the error
-// recovery due to limitations in the protocol.
+// UNSUBSCRIBE executes <https://redis.io/commands/unsubscribe>, yet never with
+// zero arguments.
 func (l *Listener) UNSUBSCRIBE(channels ...string) {
-	var todo []string
+	var channelN int
 
 	l.mutex.Lock()
 	reqTime := time.Now()
@@ -491,14 +526,21 @@ func (l *Listener) UNSUBSCRIBE(channels ...string) {
 			continue // redundant
 		}
 		l.unsubs[s] = reqTime
-		todo = append(todo, s)
+		// rewrite & count
+		channels[channelN] = s
+		channelN++
 	}
+
 	conn := l.conn
+	if conn != nil && channelN != 0 && l.expireTimer == nil {
+		l.expireTimer = time.NewTimer(l.CommandTimeout)
+		go l.expire(l.expireTimer)
+	}
 	l.mutex.Unlock()
 
-	if conn != nil && (len(todo) != 0 || len(channels) == 0) {
-		r := newRequestSize(len(todo)+1, "\r\n$11\r\nUNSUBSCRIBE")
-		r.addStringList(todo)
+	if conn != nil && channelN != 0 {
+		r := newRequestSize(channelN+1, "\r\n$11\r\nUNSUBSCRIBE")
+		r.addStringList(channels[:channelN])
 		l.submit(conn, r)
 	}
 }
