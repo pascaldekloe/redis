@@ -153,11 +153,10 @@ func TestUnsubscribe(t *testing.T) {
 
 	channel := randomKey("channel")
 	l.SUBSCRIBE(channel)
-	// await execution
-	time.Sleep(l.CommandTimeout)
+	awaitExecution()
+
 	l.UNSUBSCRIBE(channel)
-	// await execution
-	time.Sleep(l.CommandTimeout)
+	awaitExecution()
 
 	clientCount, err := testClient.PUBLISHString(channel, "ping")
 	if err != nil {
@@ -175,8 +174,7 @@ func TestUnsubscribeRace(t *testing.T) {
 	l.SUBSCRIBE(channel)
 	// don't await execution
 	l.UNSUBSCRIBE(channel)
-	// await execution
-	time.Sleep(l.CommandTimeout)
+	awaitExecution()
 
 	clientCount, err := testClient.PUBLISHString(channel, "ping")
 	if err != nil {
@@ -221,8 +219,7 @@ func TestListenerClose(t *testing.T) {
 	channel1 := randomKey("channel")
 	channel2 := randomKey("channel")
 	l.SUBSCRIBE(channel1)
-	// await execution
-	time.Sleep(l.CommandTimeout)
+	awaitExecution()
 	l.SUBSCRIBE(channel2)
 	// don't await execution
 	l.Close()
@@ -252,8 +249,7 @@ func TestListenerBufferLimit(t *testing.T) {
 
 	channel := randomKey("channel")
 	l.SUBSCRIBE(channel)
-	// await execution
-	time.Sleep(l.CommandTimeout)
+	awaitExecution()
 
 	if n, err := testClient.PUBLISH(channel, make([]byte, l.BufferSize+1)); err != nil {
 		t.Error("publish error:", err)
@@ -337,8 +333,7 @@ func benchmarkPubSub(b *testing.B, size, routineN int) {
 	defer l.Close()
 
 	l.SUBSCRIBE(channel)
-	// await execution
-	time.Sleep(10 * time.Millisecond)
+	awaitExecution()
 	b.ResetTimer()
 
 	var pubTimeNS atomic.Int64
@@ -366,4 +361,10 @@ func benchmarkPubSub(b *testing.B, size, routineN int) {
 	})
 
 	b.ReportMetric(float64(pubTimeNS.Load())/float64(b.N), "ns/publish")
+}
+
+// AwaitExecution gives the server a reasonable amount of time to complete
+// command(s).
+func awaitExecution() {
+	time.Sleep(100 * time.Millisecond)
 }
