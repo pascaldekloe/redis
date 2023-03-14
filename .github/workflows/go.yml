@@ -6,9 +6,6 @@ on:
   pull_request:
     branches: [ "master" ]
 
-env:
-  TEST_REDIS_ADDR: 'redis:6379'
-
 jobs:
   build:
     runs-on: 'ubuntu-latest'
@@ -22,7 +19,7 @@ jobs:
         - 'redis:5'
         - 'redis:6'
         - 'redis:7'
-        - 'ghcr.io/dragonflydb/dragonfly:alpha-alpine'
+	- 'ghcr.io/dragonflydb/dragonfly:alpha-alpine'
         # 'docker.dragonflydb.io/dragonflydb/dragonfly:v0.18.0'
 
     services:
@@ -30,7 +27,7 @@ jobs:
         image: ${{ matrix.service }}
 
     steps:
-      - name: Check out repository code
+      - name: Checkout
         uses: actions/checkout@v3
 
       - name: Build
@@ -38,3 +35,5 @@ jobs:
 
       - name: Test
         run: go test -v ./...
+        env:
+          TEST_REDIS_ADDR: 'redis:6379'
