@@ -32,15 +32,17 @@ type ClientConfig struct {
 	// domain sockets.
 	Addr string
 
-	// Limit execution duration when nonzero. Expiry causes a reconnect (to
-	// prevent stale connections) and a net.Error with Timeout() true.
+	// Limit execution duration when nonzero. Expiry causes a reconnect
+	// to prevent stale connections and a net.Error with Timeout() true.
 	CommandTimeout time.Duration
 
 	// Limit the duration for network connection establishment. Expiry
-	// causes an abort plus retry. Zero defaults to one second. Any command
-	// submission blocks during the first attempt. When the connect fails,
-	// then command submission receives the error of the last attempt, until
-	// the connection restores.
+	// causes an abort plus retry. See net.Dialer Timeout for details.
+	// Zero defaults to one second.
+	//
+	// Command submission blocks during the first dial attempt. When the
+	// connect fails, then command submission receives the error of the last
+	// connect attempt until the connection restores.
 	DialTimeout time.Duration
 
 	// AUTH when not nil.

@@ -46,14 +46,14 @@ type ListenerConfig struct {
 	// domain sockets.
 	Addr string
 
-	// Limits the execution time for AUTH, QUIT, SUBSCRIBE, PSUBSCRIBE,
-	// UNSUBSCRIBE, PUNSUBSCRIBE and PING. The network connection is closed
-	// upon expiry, which causes the automated reconnect attempts.
+	// Limit execution duration of AUTH, QUIT, SUBSCRIBE & UNSUBSCRIBE.
+	// Expiry causes a reconnect to prevent stale connections.
 	// Zero defaults to one second.
 	CommandTimeout time.Duration
 
-	// Upper boundary for network connection establishment. See the
-	// net.Dialer Timeout for details. Zero defaults to one second.
+	// Limit the duration for network connection establishment. Expiry
+	// causes an abort plus retry. See net.Dialer Timeout for details.
+	// Zero defaults to one second.
 	DialTimeout time.Duration
 
 	// AUTH when not nil.
