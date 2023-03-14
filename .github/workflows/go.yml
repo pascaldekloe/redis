@@ -19,7 +19,7 @@ jobs:
         - 'redis:5'
         - 'redis:6'
         - 'redis:7'
-	- 'ghcr.io/dragonflydb/dragonfly:alpha-alpine'
+        - 'ghcr.io/dragonflydb/dragonfly:alpha-alpine'
         # 'docker.dragonflydb.io/dragonflydb/dragonfly:v0.18.0'
 
     services:
