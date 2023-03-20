@@ -19,9 +19,7 @@ jobs:
         - 'redis:5'
         - 'redis:6'
         - 'redis:7'
-        # Pending on https://github.com/dragonflydb/dragonfly/issues/942
-        # 'ghcr.io/dragonflydb/dragonfly:alpha-alpine'
-        # 'docker.dragonflydb.io/dragonflydb/dragonfly:v0.18.0'
+        - 'docker.dragonflydb.io/dragonflydb/dragonfly:v1.0.0'
 
     services:
       redis:
