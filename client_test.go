@@ -210,29 +210,6 @@ func TestReadError(t *testing.T) {
 	}
 }
 
-// Note that testClient must recover for the next test to pass.
-func TestSELECTError(t *testing.T) {
-	err := testClient.SELECT(-128)
-	if err == nil {
-		t.Fatal("no error for broken SELECT")
-	}
-	if !errors.As(err, new(ServerError)) {
-		t.Errorf("broken SELECT got error %q, want a ServerError", err)
-	}
-
-	if err := testClient.SET("key", ""); err == nil {
-		t.Error("no error for command while broken SELECT")
-	} else if s := err.Error(); !strings.Contains(s, "offline") || !strings.Contains(s, "SELECT") {
-		t.Errorf("command got error %q, want mention of offline and SELECT", s)
-	}
-
-	testClient.SELECT(0)
-	time.Sleep(time.Second)
-	if err := testClient.SET("key", ""); err != nil {
-		t.Error("SELECT did not recover; command error:", err)
-	}
-}
-
 func TestRedisError(t *testing.T) {
 	// server errors may not interfear with other commands
 	t.Parallel()
@@ -435,10 +412,6 @@ func TestNoAllocation(t *testing.T) {
 	value := strings.Repeat("v", 10e6)
 
 	f := func() {
-		if err := testClient.SELECT(2); err != nil {
-			t.Fatal(err)
-		}
-
 		if _, err := testClient.INCR(key); err != nil {
 			t.Fatal(err)
 		}

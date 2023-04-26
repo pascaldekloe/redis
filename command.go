@@ -3,7 +3,6 @@ package redis
 import (
 	"errors"
 	"fmt"
-	"sync/atomic"
 	"time"
 )
 
@@ -64,17 +63,6 @@ func (o *SETOptions) args() (existArg, expireArg string, expire int64, err error
 		return "", "", 0, errors.New("redis: combination of EX and PX not allowed")
 	}
 	return
-}
-
-// SELECT executes <https://redis.io/commands/select> in a persistent way, even
-// when the return is in error. Any following command executions apply to this
-// database selection, reconnects included.
-//
-// Deprecated: Use ClientConfig.DB instead. The SELECT method has unintuitive
-// behaviour on error scenario.
-func (c *Client[Key, Value]) SELECT(db int64) error {
-	atomic.StoreInt64(&c.config.DB, db)
-	return c.commandOKOrReconnect(requestWithDecimal("*2\r\n$6\r\nSELECT\r\n$", db))
 }
 
 // MOVE executes <https://redis.io/commands/move>.

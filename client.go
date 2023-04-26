@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"sync/atomic"
 	"time"
 )
 
@@ -468,8 +467,8 @@ func (c *ClientConfig[Key, Value]) connect(readBufferSize int) (net.Conn, *bufio
 		}
 	}
 
-	if DB := atomic.LoadInt64(&c.DB); DB != 0 {
-		req := requestWithDecimal("*2\r\n$6\r\nSELECT\r\n$", DB)
+	if c.DB != 0 {
+		req := requestWithDecimal("*2\r\n$6\r\nSELECT\r\n$", c.DB)
 		defer req.free()
 
 		if c.CommandTimeout != 0 {
