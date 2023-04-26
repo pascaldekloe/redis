@@ -16,6 +16,8 @@ There is no internal error reporting/logging by design.
 This is free and unencumbered software released into the
 [public domain](https://creativecommons.org/publicdomain/zero/1.0).
 
+Version 2 [github.com/pascaldekloe/redis/v2] utilizes generics.
+
 [![Go Reference](https://pkg.go.dev/badge/github.com/pascaldekloe/redis.svg)](https://pkg.go.dev/github.com/pascaldekloe/redis)
 [![Build Status](https://github.com/pascaldekloe/redis/actions/workflows/go.yml/badge.svg)](https://github.com/pascaldekloe/redis/actions/workflows/go.yml)
 
