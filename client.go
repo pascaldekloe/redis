@@ -476,9 +476,8 @@ func (c *ClientConfig) connect(readBufferSize int) (net.Conn, *bufio.Reader, err
 
 	// apply sticky settings
 	if c.Password != nil {
-		req := newRequest("*2\r\n$4\r\nAUTH\r\n$")
+		req := requestWithString("*2\r\n$4\r\nAUTH\r\n$", c.Password)
 		defer req.free()
-		req.addBytes(c.Password)
 
 		if c.CommandTimeout != 0 {
 			conn.SetDeadline(time.Now().Add(c.CommandTimeout))
@@ -496,9 +495,8 @@ func (c *ClientConfig) connect(readBufferSize int) (net.Conn, *bufio.Reader, err
 	}
 
 	if DB := atomic.LoadInt64(&c.DB); DB != 0 {
-		req := newRequest("*2\r\n$6\r\nSELECT\r\n$")
+		req := requestWithDecimal("*2\r\n$6\r\nSELECT\r\n$", DB)
 		defer req.free()
-		req.addDecimal(DB)
 
 		if c.CommandTimeout != 0 {
 			conn.SetDeadline(time.Now().Add(c.CommandTimeout))

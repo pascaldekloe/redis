@@ -13,16 +13,12 @@ import (
 
 // PUBLISH executes <https://redis.io/commands/publish>.
 func (c *Client) PUBLISH(channel string, message []byte) (clientCount int64, err error) {
-	r := newRequest("*3\r\n$7\r\nPUBLISH\r\n$")
-	r.addStringBytes(channel, message)
-	return c.commandInteger(r)
+	return c.commandInteger(requestWith2Strings("*3\r\n$7\r\nPUBLISH\r\n$", channel, message))
 }
 
 // PUBLISHString executes <https://redis.io/commands/publish>.
 func (c *Client) PUBLISHString(channel, message string) (clientCount int64, err error) {
-	r := newRequest("*3\r\n$7\r\nPUBLISH\r\n$")
-	r.addStringString(channel, message)
-	return c.commandInteger(r)
+	return c.commandInteger(requestWith2Strings("*3\r\n$7\r\nPUBLISH\r\n$", channel, message))
 }
 
 // ListenerConfig defines a Listener setup.
@@ -201,7 +197,7 @@ func (l *Listener) Close() error {
 	l.mutex.Unlock()
 
 	if conn != nil {
-		l.submit(conn, newRequest("*1\r\n$4\r\nQUIT\r\n"))
+		l.submit(conn, requestFix("*1\r\n$4\r\nQUIT\r\n"))
 	}
 
 	// await completion
@@ -265,9 +261,7 @@ func (l *Listener) connectLoop() {
 		// resubscribe
 		if len(subs) != 0 {
 			go func(conn net.Conn) {
-				req := newRequestSize(1+len(subs), "\r\n$9\r\nSUBSCRIBE")
-				req.addStringList(subs)
-				l.submit(conn, req)
+				l.submit(conn, requestWithList("\r\n$9\r\nSUBSCRIBE", subs))
 			}(conn)
 
 		}
@@ -504,9 +498,7 @@ func (l *Listener) SUBSCRIBE(channels ...string) {
 	l.mutex.Unlock()
 
 	if conn != nil && channelN != 0 {
-		r := newRequestSize(channelN+1, "\r\n$9\r\nSUBSCRIBE")
-		r.addStringList(channels[:channelN])
-		l.submit(conn, r)
+		l.submit(conn, requestWithList("\r\n$9\r\nSUBSCRIBE", channels[:channelN]))
 	}
 }
 
@@ -539,8 +531,6 @@ func (l *Listener) UNSUBSCRIBE(channels ...string) {
 	l.mutex.Unlock()
 
 	if conn != nil && channelN != 0 {
-		r := newRequestSize(channelN+1, "\r\n$11\r\nUNSUBSCRIBE")
-		r.addStringList(channels[:channelN])
-		l.submit(conn, r)
+		l.submit(conn, requestWithList("\r\n$11\r\nUNSUBSCRIBE", channels[:channelN]))
 	}
 }

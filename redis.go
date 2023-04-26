@@ -29,6 +29,10 @@ const (
 	ElementMax = 1<<32 - 1
 )
 
+type String interface {
+	~string | ~[]byte
+}
+
 // conservativeMMS uses the IPv6 minimum MTU of 1280 bytes, minus a 40 byte IP
 // header, minus a 32 byte TCP header (with timestamps).
 const conservativeMSS = 1208
@@ -277,9 +281,6 @@ func readLine(r *bufio.Reader) (line []byte, err error) {
 	return
 }
 
-// errMapSlices rejects execution due malformed invocation.
-var errMapSlices = errors.New("redis: number of keys doesn't match number of values")
-
 type request struct {
 	buf     []byte
 	receive chan *bufio.Reader
@@ -298,400 +299,181 @@ var requestPool = sync.Pool{
 	},
 }
 
-func newRequest(prefix string) *request {
+func requestFix(prefix string) *request {
 	r := requestPool.Get().(*request)
 	r.buf = append(r.buf[:0], prefix...)
 	return r
 }
 
-func newRequestSize(n int, prefix string) *request {
+func requestSize(prefix string, size int) *request {
 	r := requestPool.Get().(*request)
 	r.buf = append(r.buf[:0], '*')
-	r.buf = strconv.AppendUint(r.buf, uint64(n), 10)
+	r.buf = strconv.AppendUint(r.buf, uint64(uint(size)), 10)
 	r.buf = append(r.buf, prefix...)
 	return r
 }
 
-func (r *request) addBytes(a []byte) {
-	r.bytes(a)
-	r.buf = append(r.buf, '\r', '\n')
+func requestWithString[T String](prefix string, s T) *request {
+	r := requestFix(prefix)
+	r.buf = appendStringToDollar(r.buf, s)
+	return r
 }
 
-func (r *request) addString(a string) {
-	r.string(a)
-	r.buf = append(r.buf, '\r', '\n')
+func requestWith2Strings[T1, T2 String](prefix string, s1 T1, s2 T2) *request {
+	r := requestFix(prefix)
+	r.buf = appendStringAndDollarToDollar(r.buf, s1)
+	r.buf = appendStringToDollar(r.buf, s2)
+	return r
 }
 
-func (r *request) addBytesList(a [][]byte) {
-	for _, b := range a {
-		r.buf = append(r.buf, '\r', '\n', '$')
-		r.bytes(b)
+func requestWith3Strings[T1, T2, T3 String](prefix string, s1 T1, s2 T2, s3 T3) *request {
+	r := requestFix(prefix)
+	r.buf = appendStringAndDollarToDollar(r.buf, s1)
+	r.buf = appendStringAndDollarToDollar(r.buf, s2)
+	r.buf = appendStringToDollar(r.buf, s3)
+	return r
+}
+
+func requestWithDecimal(prefix string, n int64) *request {
+	r := requestFix(prefix)
+	r.addDecimalToDollar(n)
+	return r
+}
+
+func requestWithStringAndDecimal[T String](prefix string, s T, n int64) *request {
+	r := requestFix(prefix)
+	r.buf = appendStringAndDollarToDollar(r.buf, s)
+	r.addDecimalToDollar(n)
+	return r
+}
+
+func requestWithStringAndDecimalAndString[T1, T2 String](prefix string, s1 T1, n int64, s2 T2) *request {
+	r := requestFix(prefix)
+	r.buf = appendStringAndDollarToDollar(r.buf, s1)
+	r.addSizeCRLFDecimal(n)
+	r.buf = append(r.buf, '\r', '\n', '$')
+	r.buf = appendStringToDollar(r.buf, s2)
+	return r
+}
+
+func requestWithStringAnd2Decimals[T String](prefix string, s T, n1, n2 int64) *request {
+	r := requestFix(prefix)
+	r.buf = appendStringAndDollarToDollar(r.buf, s)
+	r.addSizeCRLFDecimal(n1)
+	r.buf = append(r.buf, '\r', '\n', '$')
+	r.addDecimalToDollar(n2)
+	return r
+}
+
+func requestWith3StringsAndDecimal[T1, T2, T3 String](prefix string, s1 T1, s2 T2, s3 T3, n int64) *request {
+	r := requestFix(prefix)
+	r.buf = appendStringAndDollarToDollar(r.buf, s1)
+	r.buf = appendStringAndDollarToDollar(r.buf, s2)
+	r.buf = appendStringAndDollarToDollar(r.buf, s3)
+	r.addDecimalToDollar(n)
+	return r
+}
+
+func requestWith4StringsAndDecimal[T1, T2, T3, T4 String](prefix string, s1 T1, s2 T2, s3 T3, s4 T4, n int64) *request {
+	r := requestFix(prefix)
+	r.buf = appendStringAndDollarToDollar(r.buf, s1)
+	r.buf = appendStringAndDollarToDollar(r.buf, s2)
+	r.buf = appendStringAndDollarToDollar(r.buf, s3)
+	r.buf = appendStringAndDollarToDollar(r.buf, s4)
+	r.addDecimalToDollar(n)
+	return r
+}
+
+// Prefix must exclude both the size header and the command CRLF.
+func requestWithList[T String](prefix string, list []T) *request {
+	r := requestSize(prefix, len(list)+1)
+	r.buf = appendCRLFAndList(r.buf, list)
+	return r
+}
+
+// Prefix must exclude the size header and it must include the '$' prefix for s.
+func requestWithStringAndList[T1, T2 String](prefix string, s T1, list []T2) *request {
+	r := requestSize(prefix, len(list)+2)
+	r.buf = appendSizeCRLFString(r.buf, s)
+	r.buf = appendCRLFAndList(r.buf, list)
+	return r
+}
+
+// AppendCRLFAndList follows dst up with a CRLF and each list T.
+func appendCRLFAndList[T String](dst []byte, list []T) []byte {
+	for _, s := range list {
+		dst = append(dst, '\r', '\n', '$')
+		dst = appendSizeCRLFString(dst, s)
 	}
-	r.buf = append(r.buf, '\r', '\n')
+	return append(dst, '\r', '\n')
 }
 
-func (r *request) addStringList(a []string) {
-	for _, s := range a {
-		r.buf = append(r.buf, '\r', '\n', '$')
-		r.string(s)
+// ErrMapSlices rejects execution due malformed invocation.
+var errMapSlices = errors.New("redis: number of keys doesn't match the number of values")
+
+// Prefix must omit both the size header and the command CRLF.
+func requestWithMap[Key, Value String](prefix string, keys []Key, values []Value) (*request, error) {
+	r := requestSize(prefix, len(keys)*2+1)
+	var err error
+	r.buf, err = appendCRLFAndMap(r.buf, keys, values)
+	if err != nil {
+		return nil, err
 	}
-	r.buf = append(r.buf, '\r', '\n')
+	return r, nil
 }
 
-func (r *request) addBytesBytes(a1, a2 []byte) {
-	r.bytes(a1)
-	r.buf = append(r.buf, '\r', '\n', '$')
-	r.bytes(a2)
-	r.buf = append(r.buf, '\r', '\n')
-}
-
-func (r *request) addBytesBytesString(a1, a2 []byte, a3 string) {
-	r.bytes(a1)
-	r.buf = append(r.buf, '\r', '\n', '$')
-	r.bytes(a2)
-	r.buf = append(r.buf, '\r', '\n', '$')
-	r.string(a3)
-	r.buf = append(r.buf, '\r', '\n')
-}
-
-func (r *request) addBytesBytesStringInt(a1, a2 []byte, a3 string, a4 int64) {
-	r.bytes(a1)
-	r.buf = append(r.buf, '\r', '\n', '$')
-	r.bytes(a2)
-	r.buf = append(r.buf, '\r', '\n', '$')
-	r.string(a3)
-	r.buf = append(r.buf, '\r', '\n', '$')
-	r.decimal(a4)
-	r.buf = append(r.buf, '\r', '\n')
-}
-
-func (r *request) addBytesBytesStringStringInt(a1, a2 []byte, a3, a4 string, a5 int64) {
-	r.bytes(a1)
-	r.buf = append(r.buf, '\r', '\n', '$')
-	r.bytes(a2)
-	r.buf = append(r.buf, '\r', '\n', '$')
-	r.string(a3)
-	r.buf = append(r.buf, '\r', '\n', '$')
-	r.string(a4)
-	r.buf = append(r.buf, '\r', '\n', '$')
-	r.decimal(a5)
-	r.buf = append(r.buf, '\r', '\n')
-}
-
-func (r *request) addBytesBytesList(a1 []byte, a2 [][]byte) {
-	r.bytes(a1)
-	for _, b := range a2 {
-		r.buf = append(r.buf, '\r', '\n', '$')
-		r.bytes(b)
+// Prefix must omit both the size header and the command CRLF.
+func requestWithStringAndMap[T1, Key, Value String](prefix string, s T1, keys []Key, values []Value) (*request, error) {
+	r := requestSize(prefix, len(keys)*2+2)
+	r.buf = appendSizeCRLFString(r.buf, s)
+	var err error
+	r.buf, err = appendCRLFAndMap(r.buf, keys, values)
+	if err != nil {
+		return nil, err
 	}
-	r.buf = append(r.buf, '\r', '\n')
+	return r, nil
 }
 
-func (r *request) addBytesBytesMapLists(a1, a2 [][]byte) error {
-	if len(a1) != len(a2) {
-		return errMapSlices
+// AppendCRLFAndMap follows dst up with a CRLF and each Key–Value pair.
+func appendCRLFAndMap[Key, Value String](dst []byte, keys []Key, values []Value) ([]byte, error) {
+	if len(keys) != len(values) {
+		return nil, errMapSlices
 	}
-	for i, key := range a1 {
-		r.buf = append(r.buf, '\r', '\n', '$')
-		r.bytes(key)
-		r.buf = append(r.buf, '\r', '\n', '$')
-		r.bytes(a2[i])
+	for i := range keys {
+		dst = append(dst, '\r', '\n', '$')
+		dst = appendSizeCRLFString(dst, keys[i])
+		dst = append(dst, '\r', '\n', '$')
+		dst = appendSizeCRLFString(dst, values[i])
 	}
-	r.buf = append(r.buf, '\r', '\n')
-	return nil
+	return append(dst, '\r', '\n'), nil
 }
 
-func (r *request) addBytesInt(a1 []byte, a2 int64) {
-	r.bytes(a1)
-	r.buf = append(r.buf, '\r', '\n', '$')
-	r.decimal(a2)
-	r.buf = append(r.buf, '\r', '\n')
+// AppendStringToDollar follows a '$' in dst up with one payload.
+func appendStringToDollar[T String](dst []byte, s T) []byte {
+	dst = appendSizeCRLFString(dst, s)
+	return append(dst, '\r', '\n')
 }
 
-func (r *request) addStringBytes(a1 string, a2 []byte) {
-	r.string(a1)
-	r.buf = append(r.buf, '\r', '\n', '$')
-	r.bytes(a2)
-	r.buf = append(r.buf, '\r', '\n')
+// AppendStringAndDollarToDollar follows a '$' in dst up with one payload and a '$'.
+func appendStringAndDollarToDollar[T String](dst []byte, s T) []byte {
+	dst = appendSizeCRLFString(dst, s)
+	return append(dst, '\r', '\n', '$')
 }
 
-func (r *request) addStringBytesString(a1 string, a2 []byte, a3 string) {
-	r.string(a1)
-	r.buf = append(r.buf, '\r', '\n', '$')
-	r.bytes(a2)
-	r.buf = append(r.buf, '\r', '\n', '$')
-	r.string(a3)
-	r.buf = append(r.buf, '\r', '\n')
+// AppendSizeCRLFString follows a '$' in dst up with the length of v, a CRLF, and the
+// bytes of v.
+func appendSizeCRLFString[T String](dst []byte, s T) []byte {
+	dst = strconv.AppendUint(dst, uint64(len(s)), 10)
+	dst = append(dst, '\r', '\n')
+	return append(dst, s...)
 }
 
-func (r *request) addStringBytesStringInt(a1 string, a2 []byte, a3 string, a4 int64) {
-	r.string(a1)
-	r.buf = append(r.buf, '\r', '\n', '$')
-	r.bytes(a2)
-	r.buf = append(r.buf, '\r', '\n', '$')
-	r.string(a3)
-	r.buf = append(r.buf, '\r', '\n', '$')
-	r.decimal(a4)
+func (r *request) addDecimalToDollar(v int64) {
+	r.addSizeCRLFDecimal(v)
 	r.buf = append(r.buf, '\r', '\n')
 }
 
-func (r *request) addStringBytesStringStringInt(a1 string, a2 []byte, a3, a4 string, a5 int64) {
-	r.string(a1)
-	r.buf = append(r.buf, '\r', '\n', '$')
-	r.bytes(a2)
-	r.buf = append(r.buf, '\r', '\n', '$')
-	r.string(a3)
-	r.buf = append(r.buf, '\r', '\n', '$')
-	r.string(a4)
-	r.buf = append(r.buf, '\r', '\n', '$')
-	r.decimal(a5)
-	r.buf = append(r.buf, '\r', '\n')
-}
-
-func (r *request) addStringBytesMapLists(a1 []string, a2 [][]byte) error {
-	if len(a1) != len(a2) {
-		return errMapSlices
-	}
-	for i, key := range a1 {
-		r.buf = append(r.buf, '\r', '\n', '$')
-		r.string(key)
-		r.buf = append(r.buf, '\r', '\n', '$')
-		r.bytes(a2[i])
-	}
-	r.buf = append(r.buf, '\r', '\n')
-	return nil
-}
-
-func (r *request) addStringInt(a1 string, a2 int64) {
-	r.string(a1)
-	r.buf = append(r.buf, '\r', '\n', '$')
-	r.decimal(a2)
-	r.buf = append(r.buf, '\r', '\n')
-}
-
-func (r *request) addStringString(a1, a2 string) {
-	r.string(a1)
-	r.buf = append(r.buf, '\r', '\n', '$')
-	r.string(a2)
-	r.buf = append(r.buf, '\r', '\n')
-}
-
-func (r *request) addStringStringString(a1, a2, a3 string) {
-	r.string(a1)
-	r.buf = append(r.buf, '\r', '\n', '$')
-	r.string(a2)
-	r.buf = append(r.buf, '\r', '\n', '$')
-	r.string(a3)
-	r.buf = append(r.buf, '\r', '\n')
-}
-
-func (r *request) addStringStringStringInt(a1, a2, a3 string, a4 int64) {
-	r.string(a1)
-	r.buf = append(r.buf, '\r', '\n', '$')
-	r.string(a2)
-	r.buf = append(r.buf, '\r', '\n', '$')
-	r.string(a3)
-	r.buf = append(r.buf, '\r', '\n', '$')
-	r.decimal(a4)
-	r.buf = append(r.buf, '\r', '\n')
-}
-
-func (r *request) addStringStringStringStringInt(a1, a2, a3, a4 string, a5 int64) {
-	r.string(a1)
-	r.buf = append(r.buf, '\r', '\n', '$')
-	r.string(a2)
-	r.buf = append(r.buf, '\r', '\n', '$')
-	r.string(a3)
-	r.buf = append(r.buf, '\r', '\n', '$')
-	r.string(a4)
-	r.buf = append(r.buf, '\r', '\n', '$')
-	r.decimal(a5)
-	r.buf = append(r.buf, '\r', '\n')
-}
-
-func (r *request) addStringStringMapLists(a1, a2 []string) error {
-	if len(a1) != len(a2) {
-		return errMapSlices
-	}
-	for i, key := range a1 {
-		r.buf = append(r.buf, '\r', '\n', '$')
-		r.string(key)
-		r.buf = append(r.buf, '\r', '\n', '$')
-		r.string(a2[i])
-	}
-	r.buf = append(r.buf, '\r', '\n')
-	return nil
-}
-
-func (r *request) addStringStringList(a1 string, a2 []string) {
-	r.string(a1)
-	for _, s := range a2 {
-		r.buf = append(r.buf, '\r', '\n', '$')
-		r.string(s)
-	}
-	r.buf = append(r.buf, '\r', '\n')
-}
-
-func (r *request) addBytesBytesBytes(a1, a2, a3 []byte) {
-	r.bytes(a1)
-	r.buf = append(r.buf, '\r', '\n', '$')
-	r.bytes(a2)
-	r.buf = append(r.buf, '\r', '\n', '$')
-	r.bytes(a3)
-	r.buf = append(r.buf, '\r', '\n')
-}
-
-func (r *request) addBytesBytesStringList(a1, a2 []byte, a3 []string) {
-	r.bytes(a1)
-	r.buf = append(r.buf, '\r', '\n', '$')
-	r.bytes(a2)
-	for _, s := range a3 {
-		r.buf = append(r.buf, '\r', '\n', '$')
-		r.string(s)
-	}
-	r.buf = append(r.buf, '\r', '\n')
-}
-
-func (r *request) addBytesBytesBytesMapLists(a1 []byte, a2, a3 [][]byte) error {
-	if len(a2) != len(a3) {
-		return errMapSlices
-	}
-	r.bytes(a1)
-	for i, key := range a2 {
-		r.buf = append(r.buf, '\r', '\n', '$')
-		r.bytes(key)
-		r.buf = append(r.buf, '\r', '\n', '$')
-		r.bytes(a3[i])
-	}
-	r.buf = append(r.buf, '\r', '\n')
-	return nil
-}
-
-func (r *request) addBytesIntBytes(a1 []byte, a2 int64, a3 []byte) {
-	r.bytes(a1)
-	r.buf = append(r.buf, '\r', '\n', '$')
-	r.decimal(a2)
-	r.buf = append(r.buf, '\r', '\n', '$')
-	r.bytes(a3)
-	r.buf = append(r.buf, '\r', '\n')
-}
-
-func (r *request) addBytesIntInt(a1 []byte, a2, a3 int64) {
-	r.bytes(a1)
-	r.buf = append(r.buf, '\r', '\n', '$')
-	r.decimal(a2)
-	r.buf = append(r.buf, '\r', '\n', '$')
-	r.decimal(a3)
-	r.buf = append(r.buf, '\r', '\n')
-}
-
-func (r *request) addStringBytesStringList(a1 string, a2 []byte, a3 []string) {
-	r.string(a1)
-	r.buf = append(r.buf, '\r', '\n', '$')
-	r.bytes(a2)
-	r.buf = append(r.buf, a2...)
-	for _, s := range a3 {
-		r.buf = append(r.buf, '\r', '\n', '$')
-		r.string(s)
-	}
-	r.buf = append(r.buf, '\r', '\n')
-}
-
-func (r *request) addStringIntBytes(a1 string, a2 int64, a3 []byte) {
-	r.string(a1)
-	r.buf = append(r.buf, '\r', '\n', '$')
-	r.decimal(a2)
-	r.buf = append(r.buf, '\r', '\n', '$')
-	r.bytes(a3)
-	r.buf = append(r.buf, '\r', '\n')
-}
-
-func (r *request) addStringIntInt(a1 string, a2, a3 int64) {
-	r.string(a1)
-	r.buf = append(r.buf, '\r', '\n', '$')
-	r.decimal(a2)
-	r.buf = append(r.buf, '\r', '\n', '$')
-	r.decimal(a3)
-	r.buf = append(r.buf, '\r', '\n')
-}
-
-func (r *request) addStringIntString(a1 string, a2 int64, a3 string) {
-	r.string(a1)
-	r.buf = append(r.buf, '\r', '\n', '$')
-	r.decimal(a2)
-	r.buf = append(r.buf, '\r', '\n', '$')
-	r.string(a3)
-	r.buf = append(r.buf, '\r', '\n')
-}
-
-func (r *request) addStringStringBytes(a1, a2 string, a3 []byte) {
-	r.string(a1)
-	r.buf = append(r.buf, '\r', '\n', '$')
-	r.string(a2)
-	r.buf = append(r.buf, '\r', '\n', '$')
-	r.bytes(a3)
-	r.buf = append(r.buf, '\r', '\n')
-}
-
-func (r *request) addStringStringStringList(a1, a2 string, a3 []string) {
-	r.string(a1)
-	r.buf = append(r.buf, '\r', '\n', '$')
-	r.string(a2)
-	for _, s := range a3 {
-		r.buf = append(r.buf, '\r', '\n', '$')
-		r.string(s)
-	}
-	r.buf = append(r.buf, '\r', '\n')
-}
-
-func (r *request) addStringStringBytesMapLists(a1 string, a2 []string, a3 [][]byte) error {
-	if len(a2) != len(a3) {
-		return errMapSlices
-	}
-	r.string(a1)
-	for i, key := range a2 {
-		r.buf = append(r.buf, '\r', '\n', '$')
-		r.string(key)
-		r.buf = append(r.buf, '\r', '\n', '$')
-		r.bytes(a3[i])
-	}
-	r.buf = append(r.buf, '\r', '\n')
-	return nil
-}
-
-func (r *request) addStringStringStringMapLists(a1 string, a2, a3 []string) error {
-	if len(a2) != len(a3) {
-		return errMapSlices
-	}
-	r.string(a1)
-	for i, key := range a2 {
-		r.buf = append(r.buf, '\r', '\n', '$')
-		r.string(key)
-		r.buf = append(r.buf, '\r', '\n', '$')
-		r.string(a3[i])
-	}
-	r.buf = append(r.buf, '\r', '\n')
-	return nil
-}
-
-func (r *request) addDecimal(v int64) {
-	r.decimal(v)
-	r.buf = append(r.buf, '\r', '\n')
-}
-
-func (r *request) bytes(v []byte) {
-	r.buf = strconv.AppendUint(r.buf, uint64(len(v)), 10)
-	r.buf = append(r.buf, '\r', '\n')
-	r.buf = append(r.buf, v...)
-}
-
-func (r *request) string(v string) {
-	r.buf = strconv.AppendUint(r.buf, uint64(len(v)), 10)
-	r.buf = append(r.buf, '\r', '\n')
-	r.buf = append(r.buf, v...)
-}
-
-func (r *request) decimal(v int64) {
+func (r *request) addSizeCRLFDecimal(v int64) {
 	sizeOffset := len(r.buf)
 	sizeSingleDigit := v > -1e8 && v < 1e9
 	if sizeSingleDigit {
