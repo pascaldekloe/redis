@@ -24,7 +24,7 @@ const (
 var errConnLost = errors.New("redis: connection lost while awaiting response")
 
 // ClientConfig defines a Client setup.
-type ClientConfig[Key, Value String] struct {
+type ClientConfig struct {
 	// The host defaults to localhost, and the port defaults to 6379.
 	// Thus, the empty string defaults to "localhost:6379". Use an
 	// absolute file path (e.g. "/var/run/redis.sock") for Unix
@@ -51,21 +51,13 @@ type ClientConfig[Key, Value String] struct {
 	DB int64
 }
 
-// NewClient launches a managed connection to a node (address).
-func (c *ClientConfig[Key, Value]) NewClient() *Client[Key, Value] {
-	return newClient(*c)
-}
-
 // Client manages a connection to a Redis node until Close. Broken connection
 // states cause automated reconnects.
 //
 // Multiple goroutines may invoke methods on a Client simultaneously. Command
 // invocation applies <https://redis.io/topics/pipelining> on concurrency.
 type Client[Key, Value String] struct {
-	// Normalized node address in use. This field is read-only.
-	Addr string
-
-	config ClientConfig[Key, Value]
+	ClientConfig // read-only attributes
 
 	noCopy noCopy
 
@@ -85,29 +77,18 @@ type Client[Key, Value String] struct {
 	readTerm chan struct{}
 }
 
-// NewClient launches a managed connection to a node (address).
-// The host defaults to localhost, and the port defaults to 6379.
-// Thus, the empty string defaults to "localhost:6379". Use an
-// absolute file path (e.g. "/var/run/redis.sock") for Unix
-// domain sockets.
-//
-// A command time-out limits execution duration when nonzero. Expiry causes a
-// reconnect (to prevent stale connections) and a net.Error with Timeout() true.
-//
-// The dial time-out limits the duration for network connection establishment.
-// Expiry causes an abort + retry. Zero defaults to one second. Any command
-// submission blocks on the first attempt. When connection establishment fails,
-// then command submission receives the error of the last attempt, until the
-// connection restores.
-func NewClient[Key, Value String](addr string, commandTimeout, dialTimeout time.Duration) *Client[Key, Value] {
-	return newClient(ClientConfig[Key, Value]{
+// NewDefaultClient launches a managed connection to a node (address).
+// Both CommandTimeout and DialTimeout are set to one second.
+func NewDefaultClient[Key, Value String](addr string) *Client[Key, Value] {
+	return NewClient[Key, Value](ClientConfig{
 		Addr:           addr,
-		CommandTimeout: commandTimeout,
-		DialTimeout:    dialTimeout,
+		CommandTimeout: time.Second,
+		DialTimeout:    time.Second,
 	})
 }
 
-func newClient[Key, Value String](config ClientConfig[Key, Value]) *Client[Key, Value] {
+// NewClient launches a managed connection to a node (address).
+func NewClient[Key, Value String](config ClientConfig) *Client[Key, Value] {
 	config.Addr = normalizeAddr(config.Addr)
 	if config.DialTimeout == 0 {
 		config.DialTimeout = time.Second
@@ -119,8 +100,7 @@ func newClient[Key, Value String](config ClientConfig[Key, Value]) *Client[Key, 
 	}
 
 	c := &Client[Key, Value]{
-		Addr:   config.Addr, // decouple
-		config: config,
+		ClientConfig: config,
 
 		connSem:   make(chan *redisConn, 1),
 		readQueue: make(chan chan<- *bufio.Reader, queueSize),
@@ -172,7 +152,7 @@ func (c *Client[Key, Value]) Close() error {
 func (c *Client[Key, Value]) connectOrClosed() {
 	var retryDelay time.Duration
 	for {
-		conn, reader, err := c.config.connect(conservativeMSS)
+		conn, reader, err := c.connect(conservativeMSS)
 		if err != nil {
 			retry := time.NewTimer(retryDelay)
 
@@ -237,8 +217,8 @@ func (c *Client[Key, Value]) exchange(req *request) (*bufio.Reader, error) {
 
 	// apply time-out if set
 	var deadline time.Time
-	if c.config.CommandTimeout != 0 {
-		deadline = time.Now().Add(c.config.CommandTimeout)
+	if c.CommandTimeout != 0 {
+		deadline = time.Now().Add(c.CommandTimeout)
 		conn.SetWriteDeadline(deadline)
 	}
 
@@ -430,7 +410,7 @@ func (c *Client[Key, Value]) dropConnFromRead() {
 	}
 }
 
-func (c *ClientConfig[Key, Value]) connect(readBufferSize int) (net.Conn, *bufio.Reader, error) {
+func (c *ClientConfig) connect(readBufferSize int) (net.Conn, *bufio.Reader, error) {
 	network := "tcp"
 	if isUnixAddr(c.Addr) {
 		network = "unix"

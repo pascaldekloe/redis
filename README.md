@@ -26,7 +26,7 @@ Version 2 [github.com/pascaldekloe/redis/v2] utilizes generics.
 
 ```go
 // Redis is a thread-safe connection establishment.
-var Redis = redis.NewClient[string,string]("rds1.example.com", time.Second/2, 0)
+var Redis = redis.NewDefaultClient[string,string]("rds1.example.com")
 
 // Grow adds a string to a list.
 func Grow() {

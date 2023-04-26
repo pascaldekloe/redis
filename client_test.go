@@ -14,7 +14,6 @@ import (
 	"time"
 )
 
-var testConfig ClientConfig[string, string]
 var testClient, benchClient *Client[string, string]
 
 func init() {
@@ -22,27 +21,22 @@ func init() {
 	if !ok {
 		log.Fatal("Need TEST_REDIS_ADDR evironment variable with an address of a test server.\nCAUTION! Tests insert, modify and delete data.")
 	}
-	testConfig.Addr = addr
-
+	config := ClientConfig{Addr: addr}
 	if s, ok := os.LookupEnv("TEST_REDIS_PASSWORD"); ok {
-		testConfig.Password = []byte(s)
+		config.Password = []byte(s)
 	}
 
-	benchClient = testConfig.NewClient()
+	benchClient = NewClient[string, string](config)
 
-	testConfig.CommandTimeout = time.Second
-	testClient = testConfig.NewClient()
+	config.CommandTimeout = time.Second
+	testClient = NewClient[string, string](config)
 
 	// make random keys vary
 	rand.Seed(time.Now().UnixNano())
 }
 
 func byteValueClient(t testing.TB) *Client[string, []byte] {
-	config := ClientConfig[string, []byte]{
-		Addr:     testConfig.Addr,
-		Password: testConfig.Password,
-	}
-	c := config.NewClient()
+	c := NewClient[string, []byte](testClient.ClientConfig)
 	t.Cleanup(func() {
 		err := c.Close()
 		if err != nil {
@@ -58,7 +52,7 @@ func randomKey(prefix string) string {
 
 func TestClose(t *testing.T) {
 	t.Parallel()
-	c := NewClient[string, string](testClient.Addr, 0, 0)
+	c := NewDefaultClient[string, string](testClient.Addr)
 	if err := c.Close(); err != nil {
 		t.Fatal("close got error:", err)
 	}
@@ -74,7 +68,7 @@ func TestClose(t *testing.T) {
 
 func TestCloseBussy(t *testing.T) {
 	t.Parallel()
-	c := testConfig.NewClient()
+	c := NewClient[string, string](testClient.ClientConfig)
 	key := randomKey("counter")
 
 	timeout := time.NewTimer(time.Second)
@@ -115,9 +109,10 @@ func TestCloseBussy(t *testing.T) {
 func TestUnavailable(t *testing.T) {
 	t.Parallel()
 
-	connectTimeout := 100 * time.Millisecond
-
-	c := NewClient[string, string]("doesnotexist.example.com:70", 0, connectTimeout)
+	config := testClient.ClientConfig
+	config.Addr = "doesnotexist.example.com:70"
+	config.DialTimeout = 100 * time.Millisecond
+	c := NewClient[string, string](config)
 	defer func() {
 		if err := c.Close(); err != nil {
 			t.Error("close got error:", err)
@@ -136,7 +131,7 @@ func TestUnavailable(t *testing.T) {
 	}
 
 	// let the Client retry…
-	time.Sleep(2 * connectTimeout)
+	time.Sleep(2 * config.DialTimeout)
 
 	_, err = c.GET("arbitrary")
 	if e := new(net.OpError); !errors.As(err, &e) {

@@ -10,7 +10,7 @@ import (
 
 func ExampleClient_SETWithOptions() {
 	// connection setup
-	var Redis = redis.NewClient[string, string]("rds1.example.com", time.Second/2, 0)
+	var Redis = redis.NewDefaultClient[string, string]("rds1.example.com")
 	defer Redis.Close()
 
 	// execute command

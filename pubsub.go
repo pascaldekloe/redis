@@ -222,7 +222,7 @@ func (l *Listener) connectLoop() {
 
 	var retryDelay time.Duration
 	for {
-		config := ClientConfig[string, string]{
+		config := ClientConfig{
 			Addr:           l.Addr,
 			CommandTimeout: l.CommandTimeout,
 			DialTimeout:    l.DialTimeout,

@@ -47,10 +47,10 @@ func newTestListener(t *testing.T) (*Listener, <-chan *listenerCall) {
 			}
 		},
 
-		Addr:           testConfig.Addr,
-		CommandTimeout: testConfig.CommandTimeout,
-		DialTimeout:    testConfig.DialTimeout,
-		Password:       testConfig.Password,
+		Addr:           testClient.Addr,
+		CommandTimeout: testClient.CommandTimeout,
+		DialTimeout:    testClient.DialTimeout,
+		Password:       testClient.Password,
 	})
 
 	t.Cleanup(func() {
@@ -329,10 +329,10 @@ func benchmarkPubSub(b *testing.B, size, routineN int) {
 				close(done)
 			}
 		},
-		Addr:           testConfig.Addr,
-		CommandTimeout: testConfig.CommandTimeout,
-		DialTimeout:    testConfig.DialTimeout,
-		Password:       testConfig.Password,
+		Addr:           testClient.Addr,
+		CommandTimeout: testClient.CommandTimeout,
+		DialTimeout:    testClient.DialTimeout,
+		Password:       testClient.Password,
 	})
 	defer l.Close()
 
