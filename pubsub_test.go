@@ -1,11 +1,10 @@
 package redis
 
 import (
-	"encoding/binary"
 	"fmt"
 	"io"
+	"strings"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -99,7 +98,7 @@ func TestSubscribe(t *testing.T) {
 		var clientN int64
 		for clientN == 0 {
 			var err error
-			clientN, err = testClient.PUBLISH(channel, []byte(message1))
+			clientN, err = testClient.PUBLISH(channel, message1)
 			switch {
 			case err != nil:
 				t.Error("publish error:", err)
@@ -260,12 +259,12 @@ func TestListenerBufferLimit(t *testing.T) {
 	l.SUBSCRIBE(channel)
 	awaitExecution()
 
-	if n, err := testClient.PUBLISH(channel, make([]byte, l.BufferSize+1)); err != nil {
+	if n, err := testClient.PUBLISH(channel, strings.Repeat("A", l.BufferSize+1)); err != nil {
 		t.Error("publish error:", err)
 	} else if n != 1 {
 		t.Errorf("publish got %d clients, want 1", n)
 	}
-	if n, err := testClient.PUBLISH(channel, make([]byte, l.BufferSize)); err != nil {
+	if n, err := testClient.PUBLISH(channel, strings.Repeat("A", l.BufferSize)); err != nil {
 		t.Error("publish error:", err)
 	} else if n != 1 {
 		t.Errorf("publish got %d clients, want 1", n)
@@ -312,7 +311,6 @@ func benchmarkPubSub(b *testing.B, size, routineN int) {
 	// closed after reception of b.N messages
 	done := make(chan struct{})
 	var messageCount int
-	var delayNS uint64
 	l := NewListener(ListenerConfig{
 		Func: func(_ string, message []byte, err error) {
 			if err != nil {
@@ -325,12 +323,9 @@ func benchmarkPubSub(b *testing.B, size, routineN int) {
 			if l := len(message); l != size {
 				b.Errorf("called with %d bytes, want %d", l, size)
 			}
-			timestamp := binary.LittleEndian.Uint64(message)
 
-			delayNS += uint64(time.Now().UnixNano()) - timestamp
 			messageCount++
 			if messageCount == b.N {
-				b.ReportMetric(float64(delayNS)/float64(messageCount), "ns/delay")
 				close(done)
 			}
 		},
@@ -345,17 +340,11 @@ func benchmarkPubSub(b *testing.B, size, routineN int) {
 	awaitExecution()
 	b.ResetTimer()
 
-	var pubTimeNS atomic.Int64
-
 	// publish
-	message := make([]byte, size)
+	message := strings.Repeat("B", size)
 	b.SetParallelism(routineN)
 	b.RunParallel(func(pb *testing.PB) {
-		start := time.Now().UnixNano()
 		for pb.Next() {
-			timestamp := uint64(time.Now().UnixNano())
-			binary.LittleEndian.PutUint64(message, timestamp)
-
 			n, err := benchClient.PUBLISH(channel, message)
 			if err != nil {
 				b.Fatal("PUBLISH error:", err)
@@ -364,12 +353,9 @@ func benchmarkPubSub(b *testing.B, size, routineN int) {
 				b.Fatalf("PUBLISH to %d clients, want 1", n)
 			}
 		}
-		pubTimeNS.Add(time.Now().UnixNano() - start)
 
 		<-done // await receival
 	})
-
-	b.ReportMetric(float64(pubTimeNS.Load())/float64(b.N), "ns/publish")
 }
 
 // AwaitExecution gives the server a reasonable amount of time to complete

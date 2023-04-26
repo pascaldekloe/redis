@@ -24,11 +24,11 @@ This is free and unencumbered software released into the
 
 ```go
 // Redis is a thread-safe connection establishment.
-var Redis = redis.NewClient("rds1.example.com", time.Second/2, 0)
+var Redis = redis.NewClient[string,string]("rds1.example.com", time.Second/2, 0)
 
 // Grow adds a string to a list.
 func Grow() {
-	newLen, err := Redis.RPUSHString("demo_list", "hello")
+	newLen, err := Redis.RPUSH("demo_list", "hello")
 	if err != nil {
 		log.Print("demo_list update error: ", err)
 		return
@@ -38,7 +38,7 @@ func Grow() {
 
 // Ping pushes a message to a publish–subscribe channel.
 func Ping() {
-	clientCount, err := Redis.PUBLISHString("demo_channel", "ping")
+	clientCount, err := Redis.PUBLISH("demo_channel", "ping")
 	if err != nil {
 		log.Print("demo_channel publish error: ", err)
 		return

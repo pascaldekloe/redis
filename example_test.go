@@ -8,13 +8,13 @@ import (
 	"github.com/pascaldekloe/redis"
 )
 
-func ExampleClient_SETStringWithOptions() {
+func ExampleClient_SETWithOptions() {
 	// connection setup
-	var Redis = redis.NewClient("rds1.example.com", time.Second/2, 0)
+	var Redis = redis.NewClient[string, string]("rds1.example.com", time.Second/2, 0)
 	defer Redis.Close()
 
 	// execute command
-	ok, err := Redis.SETStringWithOptions("k", "v", redis.SETOptions{
+	ok, err := Redis.SETWithOptions("k", "v", redis.SETOptions{
 		Flags:  redis.NX | redis.EX,
 		Expire: time.Minute,
 	})

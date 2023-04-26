@@ -1,7 +1,6 @@
 package redis
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -15,15 +14,16 @@ import (
 	"time"
 )
 
-var testConfig ClientConfig
-var testClient, benchClient *Client
+var testConfig ClientConfig[string, string]
+var testClient, benchClient *Client[string, string]
 
 func init() {
-	var ok bool
-	testConfig.Addr, ok = os.LookupEnv("TEST_REDIS_ADDR")
+	addr, ok := os.LookupEnv("TEST_REDIS_ADDR")
 	if !ok {
 		log.Fatal("Need TEST_REDIS_ADDR evironment variable with an address of a test server.\nCAUTION! Tests insert, modify and delete data.")
 	}
+	testConfig.Addr = addr
+
 	if s, ok := os.LookupEnv("TEST_REDIS_PASSWORD"); ok {
 		testConfig.Password = []byte(s)
 	}
@@ -37,13 +37,28 @@ func init() {
 	rand.Seed(time.Now().UnixNano())
 }
 
+func byteValueClient(t testing.TB) *Client[string, []byte] {
+	config := ClientConfig[string, []byte]{
+		Addr:     testConfig.Addr,
+		Password: testConfig.Password,
+	}
+	c := config.NewClient()
+	t.Cleanup(func() {
+		err := c.Close()
+		if err != nil {
+			t.Error("close error:", err)
+		}
+	})
+	return c
+}
+
 func randomKey(prefix string) string {
 	return fmt.Sprintf("%s-%d", prefix, rand.Uint64())
 }
 
 func TestClose(t *testing.T) {
 	t.Parallel()
-	c := NewClient(testClient.Addr, 0, 0)
+	c := NewClient[string, string](testClient.Addr, 0, 0)
 	if err := c.Close(); err != nil {
 		t.Fatal("close got error:", err)
 	}
@@ -102,7 +117,7 @@ func TestUnavailable(t *testing.T) {
 
 	connectTimeout := 100 * time.Millisecond
 
-	c := NewClient("doesnotexist.example.com:70", 0, connectTimeout)
+	c := NewClient[string, string]("doesnotexist.example.com:70", 0, connectTimeout)
 	defer func() {
 		if err := c.Close(); err != nil {
 			t.Error("close got error:", err)
@@ -205,7 +220,7 @@ func TestSELECTError(t *testing.T) {
 		t.Errorf("broken SELECT got error %q, want a ServerError", err)
 	}
 
-	if err := testClient.SET("key", nil); err == nil {
+	if err := testClient.SET("key", ""); err == nil {
 		t.Error("no error for command while broken SELECT")
 	} else if s := err.Error(); !strings.Contains(s, "offline") || !strings.Contains(s, "SELECT") {
 		t.Errorf("command got error %q, want mention of offline and SELECT", s)
@@ -213,7 +228,7 @@ func TestSELECTError(t *testing.T) {
 
 	testClient.SELECT(0)
 	time.Sleep(time.Second)
-	if err := testClient.SET("key", nil); err != nil {
+	if err := testClient.SET("key", ""); err != nil {
 		t.Error("SELECT did not recover; command error:", err)
 	}
 }
@@ -222,7 +237,7 @@ func TestRedisError(t *testing.T) {
 	// server errors may not interfear with other commands
 	t.Parallel()
 
-	key, value := randomKey("test"), []byte("abc")
+	key, value := randomKey("test"), "abc"
 	newLen, err := testClient.APPEND(key, value)
 	if err != nil {
 		t.Fatalf("APPEND %q %q error: %s", key, value, err)
@@ -231,7 +246,7 @@ func TestRedisError(t *testing.T) {
 		t.Errorf("APPEND %q %q got length %d, want %d", key, value, newLen, len(value))
 	}
 
-	_, err = testClient.BytesDELArgs()
+	_, err = testClient.DELArgs()
 	switch e := err.(type) {
 	default:
 		t.Errorf("DEL without arguments got error %v, want a RedisError", err)
@@ -273,7 +288,7 @@ func BenchmarkSimpleString(b *testing.B) {
 		}
 	}()
 
-	value := make([]byte, 8)
+	value := "01234567"
 	b.Run("sequential", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
 			if err := benchClient.SET(key, value); err != nil {
@@ -326,62 +341,37 @@ func BenchmarkBulk(b *testing.B) {
 		}
 	}()
 
-	getBytes := func(b *testing.B, size int) {
-		bytes, err := benchClient.GET(key)
-		if err != nil {
-			b.Fatal("error:", err)
-		}
-		if len(bytes) != size {
-			b.Fatalf("got %d bytes, want %d", len(bytes), size)
-		}
-	}
-	getString := func(b *testing.B, size int) {
-		s, _, err := benchClient.GETString(key)
-		if err != nil {
-			b.Fatal("error:", err)
-		}
-		if len(s) != size {
-			b.Fatalf("got %d bytes, want %d", len(s), size)
-		}
-	}
-
 	for _, size := range []int{8, 800, 24000} {
 		b.Run(fmt.Sprintf("%dB", size), func(b *testing.B) {
-			if err := benchClient.SET(key, make([]byte, size)); err != nil {
+			if err := benchClient.SET(key, strings.Repeat("B", size)); err != nil {
 				b.Fatal("population error:", err)
 			}
 
 			b.Run("sequential", func(b *testing.B) {
-				b.Run("bytes", func(b *testing.B) {
-					b.SetBytes(int64(size))
-					for i := 0; i < b.N; i++ {
-						getBytes(b, size)
+				b.SetBytes(int64(size))
+				for i := 0; i < b.N; i++ {
+					v, err := benchClient.GET(key)
+					if err != nil {
+						b.Fatal("error:", err)
 					}
-				})
-				b.Run("string", func(b *testing.B) {
-					b.SetBytes(int64(size))
-					for i := 0; i < b.N; i++ {
-						getString(b, size)
+					if len(v) != size {
+						b.Fatalf("got %d bytes, want %d", len(v), size)
 					}
-				})
+				}
 			})
 
 			b.Run("parallel", func(b *testing.B) {
-				b.Run("bytes", func(b *testing.B) {
+				b.RunParallel(func(pb *testing.PB) {
 					b.SetBytes(int64(size))
-					b.RunParallel(func(pb *testing.PB) {
-						for pb.Next() {
-							getBytes(b, size)
+					for pb.Next() {
+						v, err := benchClient.GET(key)
+						if err != nil {
+							b.Fatal("error:", err)
 						}
-					})
-				})
-				b.Run("string", func(b *testing.B) {
-					b.SetBytes(int64(size))
-					b.RunParallel(func(pb *testing.PB) {
-						for pb.Next() {
-							getString(b, size)
+						if len(v) != size {
+							b.Fatalf("got %d bytes, want %d", len(v), size)
 						}
-					})
+					}
 				})
 			})
 		})
@@ -396,29 +386,10 @@ func BenchmarkArray(b *testing.B) {
 		}
 	}()
 
-	getBytes := func(b *testing.B, size int64) {
-		values, err := benchClient.LRANGE(key, 0, size-1)
-		if err != nil {
-			b.Fatal("error:", err)
-		}
-		if int64(len(values)) != size {
-			b.Fatalf("got %d values", len(values))
-		}
-	}
-	getString := func(b *testing.B, size int64) {
-		values, err := benchClient.LRANGEString(key, 0, size-1)
-		if err != nil {
-			b.Fatal("error:", err)
-		}
-		if int64(len(values)) != size {
-			b.Fatalf("got %d values", len(values))
-		}
-	}
-
 	for _, size := range []int64{1, 12, 144} {
 		b.Run(fmt.Sprintf("%d×8B", size), func(b *testing.B) {
 			for {
-				n, err := benchClient.RPUSH(key, make([]byte, 8))
+				n, err := benchClient.RPUSH(key, strings.Repeat("B", 8))
 				if err != nil {
 					b.Fatal("population error:", err)
 				}
@@ -428,36 +399,30 @@ func BenchmarkArray(b *testing.B) {
 			}
 
 			b.Run("sequential", func(b *testing.B) {
-				b.Run("bytes", func(b *testing.B) {
-					b.SetBytes(size * 8)
-					for i := 0; i < b.N; i++ {
-						getBytes(b, size)
+				b.SetBytes(size * 8)
+				for i := 0; i < b.N; i++ {
+					values, err := benchClient.LRANGE(key, 0, size-1)
+					if err != nil {
+						b.Fatal("error:", err)
 					}
-				})
-				b.Run("string", func(b *testing.B) {
-					b.SetBytes(size * 8)
-					for i := 0; i < b.N; i++ {
-						getString(b, size)
+					if int64(len(values)) != size {
+						b.Fatalf("got %d values, want %d", len(values), size)
 					}
-				})
+				}
 			})
 
 			b.Run("parallel", func(b *testing.B) {
-				b.Run("bytes", func(b *testing.B) {
-					b.SetBytes(size * 8)
-					b.RunParallel(func(pb *testing.PB) {
-						for pb.Next() {
-							getBytes(b, size)
+				b.RunParallel(func(pb *testing.PB) {
+					b.SetBytes(int64(size) * 8)
+					for pb.Next() {
+						values, err := benchClient.LRANGE(key, 0, size-1)
+						if err != nil {
+							b.Fatal("error:", err)
 						}
-					})
-				})
-				b.Run("string", func(b *testing.B) {
-					b.SetBytes(size * 8)
-					b.RunParallel(func(pb *testing.PB) {
-						for pb.Next() {
-							getString(b, size)
+						if int64(len(values)) != size {
+							b.Fatalf("got %d values, want %d", len(values), size)
 						}
-					})
+					}
 				})
 			})
 		})
@@ -467,7 +432,7 @@ func BenchmarkArray(b *testing.B) {
 func TestNoAllocation(t *testing.T) {
 	// both too large for stack:
 	key := randomKey(strings.Repeat("k", 10e6))
-	value := bytes.Repeat([]byte{'v'}, 10e6)
+	value := strings.Repeat("v", 10e6)
 
 	f := func() {
 		if err := testClient.SELECT(2); err != nil {
@@ -487,7 +452,7 @@ func TestNoAllocation(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		if err := testClient.HMSET(key, []string{key}, [][]byte{value}); err != nil {
+		if err := testClient.HMSET(key, []string{key}, []string{value}); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := testClient.DELArgs(key); err != nil {

@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"sync"
+	"unsafe"
 )
 
 // Server Limits
@@ -29,6 +30,7 @@ const (
 	ElementMax = 1<<32 - 1
 )
 
+// String is a key and/or value abstraction.
 type String interface {
 	~string | ~[]byte
 }
@@ -149,77 +151,30 @@ func readInteger(r *bufio.Reader) (int64, error) {
 	}
 }
 
-func readBulkBytes(r *bufio.Reader) ([]byte, error) {
+func readBulk[T String](r *bufio.Reader) (bulk T, err error) {
 	size, err := readBulkSize(r)
 	if err != nil {
-		return nil, err
+		return bulk, err
 	}
 	bytes := make([]byte, size)
 	_, err = io.ReadFull(r, bytes)
 	if err == nil {
 		_, err = r.Discard(2) // skip CRLF
 	}
-	return bytes, err
+	return *(*T)(unsafe.Pointer(&bytes)), err
 }
 
-func readBulkString(r *bufio.Reader) (string, error) {
-	size, err := readBulkSize(r)
-	if err != nil {
-		return "", err
-	}
-
-	slice, err := r.Peek(int(size))
-	switch err {
-	case nil:
-		s := string(slice)
-		_, err = r.Discard(len(s) + 2) // skip peek + CRLF
-		return s, err
-
-	case bufio.ErrBufferFull:
-		buf := make([]byte, size)
-		_, err = io.ReadFull(r, buf)
-		if err != nil {
-			return "", err
-		}
-		_, err = r.Discard(2) // skip CRLF
-		return string(buf), err
-	}
-	return "", err
-}
-
-func readBytesArray(r *bufio.Reader) ([][]byte, error) {
+func readArray[T String](r *bufio.Reader) ([]T, error) {
 	l, err := readArrayLen(r)
-	if err != nil {
+	if l == 0 {
 		return nil, err
 	}
-	array := make([][]byte, l)
+	array := make([]T, l)
 	for i := range array {
-		bytes, err := readBulkBytes(r)
+		array[i], err = readBulk[T](r)
 		switch err {
-		case nil:
-			array[i] = bytes
-		case errNull:
-			array[i] = nil
-		default:
-			return nil, err
-		}
-	}
-	return array, nil
-}
-
-func readStringArray(r *bufio.Reader) ([]string, error) {
-	l, err := readArrayLen(r)
-	if err != nil {
-		return nil, err
-	}
-	array := make([]string, l)
-	for i := range array {
-		s, err := readBulkString(r)
-		switch err {
-		case nil:
-			array[i] = s
-		case errNull:
-			array[i] = ""
+		case nil, errNull:
+			break // OK
 		default:
 			return nil, err
 		}

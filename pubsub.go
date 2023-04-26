@@ -12,12 +12,12 @@ import (
 )
 
 // PUBLISH executes <https://redis.io/commands/publish>.
-func (c *Client) PUBLISH(channel string, message []byte) (clientCount int64, err error) {
+func (c *Client[Key, Value]) PUBLISH(channel Key, message Value) (clientCount int64, err error) {
 	return c.commandInteger(requestWith2Strings("*3\r\n$7\r\nPUBLISH\r\n$", channel, message))
 }
 
 // PUBLISHString executes <https://redis.io/commands/publish>.
-func (c *Client) PUBLISHString(channel, message string) (clientCount int64, err error) {
+func (c *Client[Key, Value]) PUBLISHString(channel Key, message Value) (clientCount int64, err error) {
 	return c.commandInteger(requestWith2Strings("*3\r\n$7\r\nPUBLISH\r\n$", channel, message))
 }
 
@@ -222,7 +222,7 @@ func (l *Listener) connectLoop() {
 
 	var retryDelay time.Duration
 	for {
-		config := ClientConfig{
+		config := ClientConfig[string, string]{
 			Addr:           l.Addr,
 			CommandTimeout: l.CommandTimeout,
 			DialTimeout:    l.DialTimeout,
@@ -348,7 +348,7 @@ func (l *Listener) readLoop(reader *bufio.Reader) error {
 				return fmt.Errorf("redis: subscribe array-reply: %w", err)
 			}
 
-			channel, err := readBulkString(reader)
+			channel, err := readBulk[string](reader)
 			if err != nil {
 				return fmt.Errorf("redis: subscribe array-reply channel: %w", err)
 			}
@@ -368,7 +368,7 @@ func (l *Listener) readLoop(reader *bufio.Reader) error {
 				return fmt.Errorf("redis: unsubscribe array-reply: %w", err)
 			}
 
-			channel, err := readBulkString(reader)
+			channel, err := readBulk[string](reader)
 			if err != nil {
 				return fmt.Errorf("redis: unsubscribe array-reply channel: %w", err)
 			}

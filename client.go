@@ -25,7 +25,7 @@ const (
 var errConnLost = errors.New("redis: connection lost while awaiting response")
 
 // ClientConfig defines a Client setup.
-type ClientConfig struct {
+type ClientConfig[Key, Value String] struct {
 	// The host defaults to localhost, and the port defaults to 6379.
 	// Thus, the empty string defaults to "localhost:6379". Use an
 	// absolute file path (e.g. "/var/run/redis.sock") for Unix
@@ -53,7 +53,7 @@ type ClientConfig struct {
 }
 
 // NewClient launches a managed connection to a node (address).
-func (c *ClientConfig) NewClient() *Client {
+func (c *ClientConfig[Key, Value]) NewClient() *Client[Key, Value] {
 	return newClient(*c)
 }
 
@@ -62,11 +62,11 @@ func (c *ClientConfig) NewClient() *Client {
 //
 // Multiple goroutines may invoke methods on a Client simultaneously. Command
 // invocation applies <https://redis.io/topics/pipelining> on concurrency.
-type Client struct {
+type Client[Key, Value String] struct {
 	// Normalized node address in use. This field is read-only.
 	Addr string
 
-	config ClientConfig
+	config ClientConfig[Key, Value]
 
 	noCopy noCopy
 
@@ -100,15 +100,15 @@ type Client struct {
 // submission blocks on the first attempt. When connection establishment fails,
 // then command submission receives the error of the last attempt, until the
 // connection restores.
-func NewClient(addr string, commandTimeout, dialTimeout time.Duration) *Client {
-	return newClient(ClientConfig{
+func NewClient[Key, Value String](addr string, commandTimeout, dialTimeout time.Duration) *Client[Key, Value] {
+	return newClient(ClientConfig[Key, Value]{
 		Addr:           addr,
 		CommandTimeout: commandTimeout,
 		DialTimeout:    dialTimeout,
 	})
 }
 
-func newClient(config ClientConfig) *Client {
+func newClient[Key, Value String](config ClientConfig[Key, Value]) *Client[Key, Value] {
 	config.Addr = normalizeAddr(config.Addr)
 	if config.DialTimeout == 0 {
 		config.DialTimeout = time.Second
@@ -119,7 +119,7 @@ func newClient(config ClientConfig) *Client {
 		queueSize = queueSizeUnix
 	}
 
-	c := &Client{
+	c := &Client[Key, Value]{
 		Addr:   config.Addr, // decouple
 		config: config,
 
@@ -145,7 +145,7 @@ type redisConn struct {
 // Command submission is stopped with ErrClosed.
 // All pending commands are dealt with on return.
 // Calling Close more than once has no effect.
-func (c *Client) Close() error {
+func (c *Client[Key, Value]) Close() error {
 	conn := <-c.connSem // lock write
 	if conn.offline == ErrClosed {
 		// redundant invocation
@@ -170,7 +170,7 @@ func (c *Client) Close() error {
 }
 
 // connectOrClosed populates the connection semaphore.
-func (c *Client) connectOrClosed() {
+func (c *Client[Key, Value]) connectOrClosed() {
 	var retryDelay time.Duration
 	for {
 		conn, reader, err := c.config.connect(conservativeMSS)
@@ -213,7 +213,7 @@ func (c *Client) connectOrClosed() {
 	}
 }
 
-func (c *Client) cancelQueue() {
+func (c *Client[Key, Value]) cancelQueue() {
 	for {
 		select {
 		case ch := <-c.readQueue:
@@ -227,7 +227,7 @@ func (c *Client) cancelQueue() {
 
 // Exchange sends a request, and then it awaits its turn (in the pipeline) for
 // response receiption.
-func (c *Client) exchange(req *request) (*bufio.Reader, error) {
+func (c *Client[Key, Value]) exchange(req *request) (*bufio.Reader, error) {
 	conn := <-c.connSem // lock write
 
 	// validate connection state
@@ -290,7 +290,7 @@ func (c *Client) exchange(req *request) (*bufio.Reader, error) {
 	return reader, nil
 }
 
-func (c *Client) commandOK(req *request) error {
+func (c *Client[Key, Value]) commandOK(req *request) error {
 	r, err := c.exchange(req)
 	if err != nil {
 		return err
@@ -300,7 +300,7 @@ func (c *Client) commandOK(req *request) error {
 	return err
 }
 
-func (c *Client) commandOKOrReconnect(req *request) error {
+func (c *Client[Key, Value]) commandOKOrReconnect(req *request) error {
 	r, err := c.exchange(req)
 	if err != nil {
 		return err
@@ -314,7 +314,7 @@ func (c *Client) commandOKOrReconnect(req *request) error {
 	return err
 }
 
-func (c *Client) commandInteger(req *request) (int64, error) {
+func (c *Client[Key, Value]) commandInteger(req *request) (int64, error) {
 	r, err := c.exchange(req)
 	if err != nil {
 		return 0, err
@@ -324,54 +324,28 @@ func (c *Client) commandInteger(req *request) (int64, error) {
 	return integer, err
 }
 
-func (c *Client) commandBulkBytes(req *request) ([]byte, error) {
+func (c *Client[Key, Value]) commandBulk(req *request) (bulk Value, _ error) {
+	r, err := c.exchange(req)
+	if err != nil {
+		return bulk, err
+	}
+	bulk, err = readBulk[Value](r)
+	c.passRead(r, err)
+	if err == errNull {
+		err = nil
+	}
+	return bulk, err
+}
+
+func (c *Client[Key, Value]) commandArray(req *request) ([]Value, error) {
 	r, err := c.exchange(req)
 	if err != nil {
 		return nil, err
 	}
-	bytes, err := readBulkBytes(r)
+	array, err := readArray[Value](r)
 	c.passRead(r, err)
 	if err == errNull {
-		return nil, nil
-	}
-	return bytes, err
-}
-
-func (c *Client) commandBulkString(req *request) (string, bool, error) {
-	r, err := c.exchange(req)
-	if err != nil {
-		return "", false, err
-	}
-	s, err := readBulkString(r)
-	c.passRead(r, err)
-	if err == errNull {
-		return "", false, nil
-	}
-	return s, true, err
-}
-
-func (c *Client) commandBytesArray(req *request) ([][]byte, error) {
-	r, err := c.exchange(req)
-	if err != nil {
-		return nil, err
-	}
-	array, err := readBytesArray(r)
-	c.passRead(r, err)
-	if err == errNull {
-		return nil, nil
-	}
-	return array, err
-}
-
-func (c *Client) commandStringArray(req *request) ([]string, error) {
-	r, err := c.exchange(req)
-	if err != nil {
-		return nil, err
-	}
-	array, err := readStringArray(r)
-	c.passRead(r, err)
-	if err == errNull {
-		return nil, nil
+		err = nil
 	}
 	return array, err
 }
@@ -379,7 +353,7 @@ func (c *Client) commandStringArray(req *request) ([]string, error) {
 // PassRead hands over the buffered reader to the following command in line. It
 // goes in idle mode (on the redisConn from connSem) when all requests are done
 // for.
-func (c *Client) passRead(r *bufio.Reader, err error) {
+func (c *Client[Key, Value]) passRead(r *bufio.Reader, err error) {
 	switch err {
 	case nil, errNull:
 		break
@@ -426,7 +400,7 @@ func (c *Client) passRead(r *bufio.Reader, err error) {
 }
 
 // DropConnFromRead disconnects with Redis.
-func (c *Client) dropConnFromRead() {
+func (c *Client[Key, Value]) dropConnFromRead() {
 	for {
 		select {
 		case <-c.readTerm:
@@ -457,7 +431,7 @@ func (c *Client) dropConnFromRead() {
 	}
 }
 
-func (c *ClientConfig) connect(readBufferSize int) (net.Conn, *bufio.Reader, error) {
+func (c *ClientConfig[Key, Value]) connect(readBufferSize int) (net.Conn, *bufio.Reader, error) {
 	network := "tcp"
 	if isUnixAddr(c.Addr) {
 		network = "unix"
