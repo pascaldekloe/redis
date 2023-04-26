@@ -293,7 +293,7 @@ func TestListenerBufferLimit(t *testing.T) {
 }
 
 func BenchmarkPubSub(b *testing.B) {
-	for _, size := range []int{8, 800, 24000} {
+	for _, size := range []int{8, 800, 4000} {
 		b.Run(fmt.Sprintf("%dB", size), func(b *testing.B) {
 			for _, routineN := range []int{1, 2, 16} {
 				b.Run(fmt.Sprintf("%dpublishers", routineN), func(b *testing.B) {

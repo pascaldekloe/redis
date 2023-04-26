@@ -84,10 +84,6 @@ func Peek() {
 • Subscription receival does not allocate any memory.
 • Unix domain sockets make a big improvement over TCP.
 
-Redis.conf needs `client-output-buffer-limit pubsub 256mb 256mb 60` to prevent
-`scheduled to be closed ASAP for overcoming of output buffer limits` during
-pub/sub benchmarks.
-
 The following results were measured with Redis version 7, Go version 1.20, on an Apple M1.
 
 ```
