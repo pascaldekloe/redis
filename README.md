@@ -18,7 +18,7 @@ This is free and unencumbered software released into the
 
 Version 2 [github.com/pascaldekloe/redis/v2] utilizes generics.
 
-[![Go Reference](https://pkg.go.dev/badge/github.com/pascaldekloe/redis.svg)](https://pkg.go.dev/github.com/pascaldekloe/redis)
+[![Go Reference](https://pkg.go.dev/badge/github.com/pascaldekloe/redis/v2.svg)](https://pkg.go.dev/github.com/pascaldekloe/redis/v2)
 [![Build Status](https://github.com/pascaldekloe/redis/actions/workflows/go.yml/badge.svg)](https://github.com/pascaldekloe/redis/actions/workflows/go.yml)
 
 
