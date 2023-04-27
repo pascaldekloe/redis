@@ -82,10 +82,10 @@ func Peek() {
 
 ## Performance
 
-• Memory allocations are limited to user data only.
-• Subscription receival does not allocate any memory.
-• Unix domain sockets significantly reduce latency.
-• TCP performs on large payloads and high concurrency.
+* Memory allocations are limited to user data only.
+* Subscription receival does not allocate any memory.
+* Unix domain sockets significantly reduce latency.
+* TCP performs on large payloads and high concurrency.
 
 Configure Redis with `client-output-buffer-limit pubsub 512mb 512mb 60` for the benchmarks.
 
