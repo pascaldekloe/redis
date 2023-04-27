@@ -7,7 +7,7 @@ import (
 	"os"
 	"strconv"
 
-	"github.com/pascaldekloe/redis"
+	"github.com/pascaldekloe/redis/v2"
 )
 
 var (
@@ -21,7 +21,7 @@ var (
 )
 
 // Redis manages the connection.
-var Redis *redis.Client
+var Redis *redis.Client[string, []byte]
 
 func main() {
 	flag.Parse()
@@ -48,7 +48,7 @@ DESCRIPTION
 	if *authFlag {
 		config.Password, _ = ioutil.ReadAll(os.Stdin)
 	}
-	Redis = config.NewClient()
+	Redis = redis.NewClient[string, []byte](config)
 	defer Redis.Close()
 
 	print(keys)
