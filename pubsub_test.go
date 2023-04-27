@@ -113,7 +113,7 @@ func TestSubscribe(t *testing.T) {
 		}
 
 		// follow up with second message
-		clientN, err := testClient.PUBLISHString(channel, message2)
+		clientN, err := testClient.PUBLISH(channel, message2)
 		if err != nil {
 			t.Error("followup publish error:", err)
 			return
@@ -166,7 +166,7 @@ func TestUnsubscribe(t *testing.T) {
 	l.UNSUBSCRIBE(channel)
 	awaitExecution()
 
-	clientCount, err := testClient.PUBLISHString(channel, "ping")
+	clientCount, err := testClient.PUBLISH(channel, "ping")
 	if err != nil {
 		t.Error("publish got error:", err)
 	} else if clientCount != 0 {
@@ -184,7 +184,7 @@ func TestUnsubscribeRace(t *testing.T) {
 	l.UNSUBSCRIBE(channel)
 	awaitExecution()
 
-	clientCount, err := testClient.PUBLISHString(channel, "ping")
+	clientCount, err := testClient.PUBLISH(channel, "ping")
 	if err != nil {
 		t.Error("publish got error:", err)
 	} else if clientCount != 0 {
@@ -232,12 +232,12 @@ func TestListenerClose(t *testing.T) {
 	// don't await execution
 	l.Close()
 
-	if n, err := testClient.PUBLISHString(channel1, "ping"); err != nil {
+	if n, err := testClient.PUBLISH(channel1, "ping"); err != nil {
 		t.Error("publish error:", err)
 	} else if n != 0 {
 		t.Errorf("publish got %d clients, want 0", n)
 	}
-	if n, err := testClient.PUBLISHString(channel2, "ping"); err != nil {
+	if n, err := testClient.PUBLISH(channel2, "ping"); err != nil {
 		t.Error("publish subscribe error:", err)
 	} else if n != 0 {
 		t.Errorf("publish subscribe got %d clients, want 0", n)

@@ -16,11 +16,6 @@ func (c *Client[Key, Value]) PUBLISH(channel Key, message Value) (clientCount in
 	return c.commandInteger(requestWith2Strings("*3\r\n$7\r\nPUBLISH\r\n$", channel, message))
 }
 
-// PUBLISHString executes <https://redis.io/commands/publish>.
-func (c *Client[Key, Value]) PUBLISHString(channel Key, message Value) (clientCount int64, err error) {
-	return c.commandInteger(requestWith2Strings("*3\r\n$7\r\nPUBLISH\r\n$", channel, message))
-}
-
 // ListenerConfig defines a Listener setup.
 type ListenerConfig struct {
 	// Func is the callback interface for both push messages and error
