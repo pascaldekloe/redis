@@ -101,8 +101,8 @@ func (c *Client[Key, Value]) GET(k Key) (Value, error) {
 
 // MGET executes <https://redis.io/commands/mget>.
 // The Values for non-existing Keys stay zero.
-func (c *Client[Key, Value]) MGET(keys ...Key) ([]Value, error) {
-	return c.commandArray(requestWithList("\r\n$4\r\nMGET", keys))
+func (c *Client[Key, Value]) MGET(m ...Key) ([]Value, error) {
+	return c.commandArray(requestWithList("\r\n$4\r\nMGET", m))
 }
 
 // SET executes <https://redis.io/commands/set>.
@@ -140,8 +140,8 @@ func (c *Client[Key, Value]) SETWithOptions(k Key, v Value, o SETOptions) (bool,
 }
 
 // MSET executes <https://redis.io/commands/mset>.
-func (c *Client[Key, Value]) MSET(keys []Key, values []Value) error {
-	r, err := requestWithMap("\r\n$4\r\nMSET", keys, values)
+func (c *Client[Key, Value]) MSET(mk []Key, mv []Value) error {
+	r, err := requestWithMap("\r\n$4\r\nMSET", mk, mv)
 	if err != nil {
 		return err
 	}
@@ -155,8 +155,8 @@ func (c *Client[Key, Value]) DEL(k Key) (bool, error) {
 }
 
 // DELArgs executes <https://redis.io/commands/del>.
-func (c *Client[Key, Value]) DELArgs(keys ...Key) (int64, error) {
-	return c.commandInteger(requestWithList("\r\n$3\r\nDEL", keys))
+func (c *Client[Key, Value]) DELArgs(m ...Key) (int64, error) {
+	return c.commandInteger(requestWithList("\r\n$3\r\nDEL", m))
 }
 
 // INCR executes <https://redis.io/commands/incr>.
@@ -175,7 +175,7 @@ func (c *Client[Key, Value]) STRLEN(k Key) (int64, error) {
 }
 
 // GETRANGE executes <https://redis.io/commands/getrange>.
-// The return is empty if key does not exist.
+// The return is empty if the Key does not exist.
 func (c *Client[Key, Value]) GETRANGE(k Key, start, end int64) (Value, error) {
 	return c.commandBulk(requestWithStringAnd2Decimals("*4\r\n$8\r\nGETRANGE\r\n$", k, start, end))
 }
@@ -186,7 +186,7 @@ func (c *Client[Key, Value]) APPEND(k Key, v Value) (newLen int64, err error) {
 }
 
 // LLEN executes <https://redis.io/commands/llen>.
-// The return is 0 if key does not exist.
+// The return is 0 if the Key does not exist.
 func (c *Client[Key, Value]) LLEN(k Key) (int64, error) {
 	return c.commandInteger(requestWithString("*2\r\n$4\r\nLLEN\r\n$", k))
 }
@@ -199,7 +199,7 @@ func (c *Client[Key, Value]) LINDEX(k Key, index int64) (Value, error) {
 }
 
 // LRANGE executes <https://redis.io/commands/lrange>.
-// The return is empty if key does not exist.
+// The return is empty if the Key does not exist.
 func (c *Client[Key, Value]) LRANGE(k Key, start, stop int64) ([]Value, error) {
 	return c.commandArray(requestWithStringAnd2Decimals("*4\r\n$6\r\nLRANGE\r\n$", k, start, stop))
 }
@@ -237,37 +237,37 @@ func (c *Client[Key, Value]) RPUSH(k Key, v Value) (newLen int64, err error) {
 }
 
 // HGET executes <https://redis.io/commands/hget>.
-// The return is zero if key does not exist.
-func (c *Client[Key, Value]) HGET(key, field Key) (Value, error) {
-	return c.commandBulk(requestWith2Strings("*3\r\n$4\r\nHGET\r\n$", key, field))
+// The return is zero if the Key does not exist.
+func (c *Client[Key, Value]) HGET(k, f Key) (Value, error) {
+	return c.commandBulk(requestWith2Strings("*3\r\n$4\r\nHGET\r\n$", k, f))
 }
 
 // HSET executes <https://redis.io/commands/hset>.
-func (c *Client[Key, Value]) HSET(key, field Key, v Value) (newField bool, err error) {
-	created, err := c.commandInteger(requestWith3Strings("*4\r\n$4\r\nHSET\r\n$", key, field, v))
+func (c *Client[Key, Value]) HSET(k, f Key, v Value) (newField bool, err error) {
+	created, err := c.commandInteger(requestWith3Strings("*4\r\n$4\r\nHSET\r\n$", k, f, v))
 	return created != 0, err
 }
 
 // HDEL executes <https://redis.io/commands/hdel>.
-func (c *Client[Key, Value]) HDEL(key, field Key) (bool, error) {
-	removed, err := c.commandInteger(requestWith2Strings("*3\r\n$4\r\nHDEL\r\n$", key, field))
+func (c *Client[Key, Value]) HDEL(k, f Key) (bool, error) {
+	removed, err := c.commandInteger(requestWith2Strings("*3\r\n$4\r\nHDEL\r\n$", k, f))
 	return removed != 0, err
 }
 
 // HDELArgs executes <https://redis.io/commands/hdel>.
-func (c *Client[Key, Value]) HDELArgs(key Key, fields ...Key) (int64, error) {
-	return c.commandInteger(requestWithStringAndList("\r\n$4\r\nHDEL\r\n$", key, fields))
+func (c *Client[Key, Value]) HDELArgs(k Key, mf ...Key) (int64, error) {
+	return c.commandInteger(requestWithStringAndList("\r\n$4\r\nHDEL\r\n$", k, mf))
 }
 
 // HMGET executes <https://redis.io/commands/hmget>.
 // The Values for non-existing Keys stay zero.
-func (c *Client[Key, Value]) HMGET(key Key, fields ...Key) ([]Value, error) {
-	return c.commandArray(requestWithStringAndList("\r\n$5\r\nHMGET\r\n$", key, fields))
+func (c *Client[Key, Value]) HMGET(k Key, mf ...Key) ([]Value, error) {
+	return c.commandArray(requestWithStringAndList("\r\n$5\r\nHMGET\r\n$", k, mf))
 }
 
 // HMSET executes <https://redis.io/commands/hmset>.
-func (c *Client[Key, Value]) HMSET(key Key, fields []Key, values []Value) error {
-	r, err := requestWithStringAndMap("\r\n$5\r\nHMSET\r\n$", key, fields, values)
+func (c *Client[Key, Value]) HMSET(k Key, mf []Key, mv []Value) error {
+	r, err := requestWithStringAndMap("\r\n$5\r\nHMSET\r\n$", k, mf, mv)
 	if err != nil {
 		return err
 	}
