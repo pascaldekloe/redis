@@ -2,7 +2,6 @@ package redis
 
 import (
 	"errors"
-	"fmt"
 	"time"
 )
 
@@ -30,39 +29,6 @@ type SETOptions struct {
 	// or milliseconds with PX. Non-zero values without any
 	// expiry Flags are rejected to prevent mistakes.
 	Expire time.Duration
-}
-
-func (o *SETOptions) args() (existArg, expireArg string, expire int64, err error) {
-	if unknown := o.Flags &^ (NX | XX | EX | PX); unknown != 0 {
-		return "", "", 0, fmt.Errorf("redis: unknown flags %#x", unknown)
-	}
-
-	switch o.Flags & (NX | XX) {
-	case 0:
-		break
-	case NX:
-		existArg = "NX"
-	case XX:
-		existArg = "XX"
-	default:
-		return "", "", 0, errors.New("redis: combination of NX and XX not allowed")
-	}
-
-	switch o.Flags & (EX | PX) {
-	case 0:
-		if o.Expire != 0 {
-			return "", "", 0, errors.New("redis: expire time without EX nor PX not allowed")
-		}
-	case EX:
-		expireArg = "EX"
-		expire = int64(o.Expire / time.Second)
-	case PX:
-		expireArg = "PX"
-		expire = int64(o.Expire / time.Millisecond)
-	default:
-		return "", "", 0, errors.New("redis: combination of EX and PX not allowed")
-	}
-	return
 }
 
 // MOVE executes <https://redis.io/commands/move>.
@@ -114,9 +80,37 @@ func (c *Client[Key, Value]) SET(k Key, v Value) error {
 // The return is false if the SET operation was not performed due to an NX or XX
 // condition.
 func (c *Client[Key, Value]) SETWithOptions(k Key, v Value, o SETOptions) (bool, error) {
-	existArg, expireArg, expire, err := o.args()
-	if err != nil {
-		return false, err
+	if unknown := o.Flags &^ (NX | XX | EX | PX); unknown != 0 {
+		return false, errors.New("redis: unknown SET flags")
+	}
+
+	var existArg string
+	switch o.Flags & (NX | XX) {
+	case 0:
+		break
+	case NX:
+		existArg = "NX"
+	case XX:
+		existArg = "XX"
+	default:
+		return false, errors.New("redis: combination of NX and XX not allowed")
+	}
+
+	var expireArg string
+	var expire int64
+	switch o.Flags & (EX | PX) {
+	case 0:
+		if o.Expire != 0 {
+			return false, errors.New("redis: expire time without EX or PX not allowed")
+		}
+	case EX:
+		expireArg = "EX"
+		expire = int64(o.Expire / time.Second)
+	case PX:
+		expireArg = "PX"
+		expire = int64(o.Expire / time.Millisecond)
+	default:
+		return false, errors.New("redis: combination of EX and PX not allowed")
 	}
 
 	var r *request
@@ -132,7 +126,7 @@ func (c *Client[Key, Value]) SETWithOptions(k Key, v Value, o SETOptions) (bool,
 		return err == nil, err
 	}
 
-	err = c.commandOK(r)
+	err := c.commandOK(r)
 	if err == errNull {
 		return false, nil
 	}
