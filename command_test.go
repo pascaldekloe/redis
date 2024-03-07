@@ -441,6 +441,50 @@ func TestListRemove(t *testing.T) {
 	}
 }
 
+func TestSetCRUD(t *testing.T) {
+	t.Parallel()
+	key := randomKey("test-set")
+
+	n, err := testClient.SCARD(key)
+	if err != nil {
+		t.Fatalf("initial SCARD %q error: %s", key, err)
+	} else if n != 0 {
+		t.Fatalf("initial SCARD %q got %d, want 0", key, n)
+	}
+
+	ok, err := testClient.SADD(key, "a")
+	if err != nil {
+		t.Fatalf(`first SADD %q "a" error: %s`, key, err)
+	} else if !ok {
+		t.Fatalf(`first SADD %q "a" got false`, key)
+	}
+	ok, err = testClient.SADD(key, "a")
+	if err != nil {
+		t.Fatalf(`second SADD %q "a" error: %s`, key, err)
+	} else if ok {
+		t.Errorf(`second SADD %q "a" got true`, key)
+	}
+	ok, err = testClient.SADD(key, "b")
+	if err != nil {
+		t.Fatalf(`SADD %q "b" error: %s`, key, err)
+	} else if !ok {
+		t.Errorf(`SADD %q "b" got false`, key)
+	}
+
+	ok, err = testClient.SREM(key, "a")
+	if err != nil {
+		t.Fatalf(`SREM %q "a" error: %s`, key, err)
+	} else if !ok {
+		t.Errorf(`SREM %q "a" got false`, key)
+	}
+	n, err = testClient.SCARD(key)
+	if err != nil {
+		t.Fatalf("final SCARD %q error: %s", key, err)
+	} else if n != 1 {
+		t.Fatalf("final SCARD %q got %d, want 1", key, n)
+	}
+}
+
 func TestHashCRUD(t *testing.T) {
 	t.Parallel()
 	key := randomKey("test-hash")

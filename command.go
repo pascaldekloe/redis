@@ -230,6 +230,23 @@ func (c *Client[Key, Value]) RPUSH(k Key, v Value) (newLen int64, err error) {
 	return c.commandInteger(requestWith2Strings("*3\r\n$5\r\nRPUSH\r\n$", k, v))
 }
 
+// SCARD executes <https://redis.io/commands/scard>.
+func (c *Client[Key, Value]) SCARD(k Key) (int64, error) {
+	return c.commandInteger(requestWithString("*2\r\n$5\r\nSCARD\r\n$", k))
+}
+
+// SADD executes <https://redis.io/commands/sadd>.
+func (c *Client[Key, Value]) SADD(k, m Key) (bool, error) {
+	n, err := c.commandInteger(requestWith2Strings("*3\r\n$4\r\nSADD\r\n$", k, m))
+	return n != 0, err
+}
+
+// SREM executes <https://redis.io/commands/srem>.
+func (c *Client[Key, Value]) SREM(k, m Key) (bool, error) {
+	n, err := c.commandInteger(requestWith2Strings("*3\r\n$4\r\nSREM\r\n$", k, m))
+	return n != 0, err
+}
+
 // HGET executes <https://redis.io/commands/hget>.
 // The return is zero if the Key does not exist.
 func (c *Client[Key, Value]) HGET(k, f Key) (Value, error) {
