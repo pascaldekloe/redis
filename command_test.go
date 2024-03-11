@@ -670,3 +670,51 @@ func TestHashAbsent(t *testing.T) {
 		t.Errorf("HDEL %q got true, want false", key)
 	}
 }
+
+func TestExpiry(t *testing.T) {
+	t.Parallel()
+	key := randomKey("test-key")
+
+	ok, err := testClient.EXPIRE(key, 2, 0)
+	if err != nil {
+		t.Errorf("EXPIRE %q 2 error: %s", key, err)
+	} else if ok {
+		t.Errorf("EXPIRE %q 2 got OK on non-existent key", key)
+	}
+	_, err = testClient.SADD(key, "foo")
+	if err != nil {
+		t.Errorf(`SADD %q "foo" error: %s`, key, err)
+	}
+	ok, err = testClient.EXPIRE(key, 2, 0)
+	if err != nil {
+		t.Errorf("EXPIRE %q 2 error: %s", key, err)
+	} else if !ok {
+		t.Errorf("EXPIRE %q 2 got not OK on existent key", key)
+	}
+
+	ok, err = testClient.EXPIRE(key, 2, NX)
+	if err != nil {
+		t.Errorf("EXPIRE %q 2 NX error: %s", key, err)
+	} else if ok {
+		t.Errorf("EXPIRE %q 2 NX got OK with existing expiry", key)
+	}
+	ok, err = testClient.EXPIRE(key, 2, XX)
+	if err != nil {
+		t.Errorf("EXPIRE %q 2 XX error: %s", key, err)
+	} else if !ok {
+		t.Errorf("EXPIRE %q 2 XX got not OK with existing expiry", key)
+	}
+
+	ok, err = testClient.EXPIRE(key, 99, LT)
+	if err != nil {
+		t.Errorf("EXPIRE %q 99 LT error: %s", key, err)
+	} else if ok {
+		t.Errorf("EXPIRE %q 99 LT got OK on 2 second expiry", key)
+	}
+	ok, err = testClient.EXPIRE(key, 99, GT)
+	if err != nil {
+		t.Errorf("EXPIRE %q 99 GT error: %s", key, err)
+	} else if !ok {
+		t.Errorf("EXPIRE %q 99 GT got not OK on 2 second expiry", key)
+	}
+}

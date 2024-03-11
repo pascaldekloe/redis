@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-// Flags For SETOptions
+// Flags For SETOptions.
 const (
 	// NX only sets the key if it does not already exist.
 	NX = 1 << iota
@@ -16,6 +16,14 @@ const (
 	EX
 	// PX sets an expire time, in milliseconds.
 	PX
+)
+
+// EXPIRE flags include NX And XX.
+const (
+	// GT sets expiry only when the new expiry is greater than current one.
+	GT = 32 << iota
+	// LT sets expiry only when the new expiry is less than current one.
+	LT
 )
 
 // SETOptions are extra arguments for the SET command.
@@ -46,6 +54,32 @@ func (c *Client[Key, Value]) FLUSHDB(async bool) error {
 		r = requestFix("*1\r\n$7\r\nFLUSHDB\r\n")
 	}
 	return c.commandOK(r)
+}
+
+// EXPIRE executes <https://redis.io/commands/expire>.
+// Flags can be any of NX, XX, GT or LT.
+func (c *Client[Key, Value]) EXPIRE(k Key, seconds int64, flags uint) (bool, error) {
+	if unknown := flags &^ (NX | XX | GT | LT); unknown != 0 {
+		return false, errors.New("redis: unknown EXPIRE flags")
+	}
+
+	var n int64
+	var err error
+	switch flags {
+	case 0:
+		n, err = c.commandInteger(requestWithStringAndDecimal("*3\r\n$6\r\nEXPIRE\r\n$", k, seconds))
+	case NX:
+		n, err = c.commandInteger(requestWithStringAndDecimalAndString("*4\r\n$6\r\nEXPIRE\r\n$", k, seconds, "NX"))
+	case XX:
+		n, err = c.commandInteger(requestWithStringAndDecimalAndString("*4\r\n$6\r\nEXPIRE\r\n$", k, seconds, "XX"))
+	case GT:
+		n, err = c.commandInteger(requestWithStringAndDecimalAndString("*4\r\n$6\r\nEXPIRE\r\n$", k, seconds, "GT"))
+	case LT:
+		n, err = c.commandInteger(requestWithStringAndDecimalAndString("*4\r\n$6\r\nEXPIRE\r\n$", k, seconds, "LT"))
+	default:
+		return false, errors.New("redis: multiple EXPIRE flags denied")
+	}
+	return n != 0, err
 }
 
 // FLUSHALL executes <https://redis.io/commands/flushall>.
