@@ -241,10 +241,35 @@ func (c *Client[Key, Value]) SADD(k, m Key) (bool, error) {
 	return n != 0, err
 }
 
+// SADD executes <https://redis.io/commands/sadd>.
+func (c *Client[Key, Value]) SADDArgs(k Key, m ...Key) (int64, error) {
+	return c.commandInteger(requestWithStringAndList("\r\n$4\r\nSADD\r\n$", k, m))
+}
+
 // SREM executes <https://redis.io/commands/srem>.
 func (c *Client[Key, Value]) SREM(k, m Key) (bool, error) {
 	n, err := c.commandInteger(requestWith2Strings("*3\r\n$4\r\nSREM\r\n$", k, m))
 	return n != 0, err
+}
+
+// SREM executes <https://redis.io/commands/srem>.
+func (c *Client[Key, Value]) SREMArgs(k Key, m ...Key) (int64, error) {
+	return c.commandInteger(requestWithStringAndList("\r\n$4\r\nSREM\r\n$", k, m))
+}
+
+// SMEMBERS executes <https://redis.io/commands/smembers>.
+func (c *Client[Key, Value]) SMEMBERS(k Key) ([]Value, error) {
+	return c.commandArray(requestWithString("*2\r\n$8\r\nSMEMBERS\r\n$", k))
+}
+
+// SINTER executes <https://redis.io/commands/sinter>.
+func (c *Client[Key, Value]) SINTER(k ...Key) ([]Value, error) {
+	return c.commandArray(requestWithList("\r\n$6\r\nSINTER", k))
+}
+
+// SUNION executes <https://redis.io/commands/sunion>.
+func (c *Client[Key, Value]) SUNION(k ...Key) ([]Value, error) {
+	return c.commandArray(requestWithList("\r\n$6\r\nSUNION", k))
 }
 
 // HGET executes <https://redis.io/commands/hget>.

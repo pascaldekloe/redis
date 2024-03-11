@@ -3,6 +3,7 @@ package redis
 import (
 	"fmt"
 	"reflect"
+	"sort"
 	"testing"
 	"time"
 )
@@ -470,18 +471,77 @@ func TestSetCRUD(t *testing.T) {
 	} else if !ok {
 		t.Errorf(`SADD %q "b" got false`, key)
 	}
+	n, err = testClient.SCARD(key)
+	if err != nil {
+		t.Fatalf("SCARD %q error: %s", key, err)
+	} else if n != 2 {
+		t.Fatalf("SCARD %q got %d, want 2", key, n)
+	}
 
 	ok, err = testClient.SREM(key, "a")
 	if err != nil {
-		t.Fatalf(`SREM %q "a" error: %s`, key, err)
+		t.Fatalf(`first SREM %q "a" error: %s`, key, err)
 	} else if !ok {
-		t.Errorf(`SREM %q "a" got false`, key)
+		t.Errorf(`first SREM %q "a" got false`, key)
+	}
+	ok, err = testClient.SREM(key, "a")
+	if err != nil {
+		t.Fatalf(`second SREM %q "a" error: %s`, key, err)
+	} else if ok {
+		t.Errorf(`second SREM %q "a" got true`, key)
 	}
 	n, err = testClient.SCARD(key)
 	if err != nil {
 		t.Fatalf("final SCARD %q error: %s", key, err)
 	} else if n != 1 {
 		t.Fatalf("final SCARD %q got %d, want 1", key, n)
+	}
+}
+
+func TestSetSlices(t *testing.T) {
+	t.Parallel()
+	key := randomKey("test-set")
+
+	n, err := testClient.SADDArgs(key, "a", "b", "d", "e")
+	if err != nil {
+		t.Fatalf(`SADD %q "a" "b" "d" "e" error: %s`, key, err)
+	} else if n != 4 {
+		t.Fatalf(`SADD %q "a" "b" "d" "e" got %d, want 4`, key, n)
+	}
+	n, err = testClient.SREMArgs(key, "b", "c", "d")
+	if err != nil {
+		t.Fatalf(`SREM %q "b" "c" "d" error: %s`, key, err)
+	} else if n != 2 {
+		t.Errorf(`SREM %q "b" "c" "d" got %d, want 2`, key, n)
+	}
+	got, err := testClient.SMEMBERS(key)
+	sort.Strings(got) // order not guaranteed
+	if err != nil {
+		t.Fatalf("SMEMBERS %q error: %s", key, err)
+	} else if len(got) != 2 || got[0] != "a" || got[1] != "e" {
+		t.Errorf(`SMEMBERS %q got %q, want [ "a" "e" ]`, key, got)
+	}
+
+	key2 := randomKey("test-set")
+	n, err = testClient.SADDArgs(key2, "e", "f")
+	if err != nil {
+		t.Fatalf(`SADD %q "e" "f" error: %s`, key2, err)
+	} else if n != 2 {
+		t.Fatalf(`SADD %q "e" "f" got %d, want 2`, key2, n)
+	}
+	got, err = testClient.SINTER(key, key2)
+	sort.Strings(got) // order not guarteed
+	if err != nil {
+		t.Fatalf("SINTER %q error: %s", key, err)
+	} else if len(got) != 1 || got[0] != "e" {
+		t.Errorf(`SINTER %q got %q, want [ "e" ]`, key, got)
+	}
+	got, err = testClient.SUNION(key, key2)
+	sort.Strings(got) // order not guarteed
+	if err != nil {
+		t.Fatalf("SUNION %q error: %s", key, err)
+	} else if len(got) != 3 || got[0] != "a" || got[1] != "e" || got[2] != "f" {
+		t.Errorf(`SUNION %q got %q, want [ "a" "e" "f" ]`, key, got)
 	}
 }
 
